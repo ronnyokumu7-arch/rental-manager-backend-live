@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     debug: bool = False
     SECRET_KEY: str = "your-secret-key-change-in-env"
     access_token_expire_minutes: int = 60
-    database_url: str = "postgresql://postgres:rentalpass@localhost:5432/rental_manager"
+    database_url: str
     cors_origins: list[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:3002"]
     resend_api_key: str = ""
     from_email: str = "onboarding@resend.dev"
