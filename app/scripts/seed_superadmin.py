@@ -19,7 +19,7 @@ def update_password():
             user = User(
                 full_name="Super Admin",
                 email=email,
-                password_hash=get_password_hash(settings.superadmin_password[:72]),
+                password_hash=get_password_hash("admin_super!"),
                 role=UserRole.super_admin,
                 tenant_id=None,
                 is_active=True,
