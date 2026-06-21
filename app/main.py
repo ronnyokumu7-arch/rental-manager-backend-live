@@ -15,6 +15,16 @@ from app.scripts.seed_superadmin import update_password
 from app.scripts.seed_tenant_admins import seed_tenant_admin_passwords
 from app.scripts.seed_tenant_policies import seed_policies_for_existing_tenants
 
+app = FastAPI(title="Rental Manager", version="1.0.0")
+
+from fastapi.staticfiles import StaticFiles
+import os
+
+# Mount the uploads directory for serving files
+if os.path.exists("./uploads"):
+    app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
+
+
 # 1. Modern Lifespan Manager (replaces @app.on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
