@@ -1,11 +1,17 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
-from jwt.exceptions import PyJWTError, ExpiredSignatureError, DecodeError
 from passlib.context import CryptContext
 
 from app.core.config import get_settings
 
+# Gracefully handle whichever JWT package is actually installed
+try:
+    from jwt.exceptions import PyJWTError, ExpiredSignatureError, DecodeError
+    JWT_ERRORS = (PyJWTError, ExpiredSignatureError, DecodeError)
+except ImportError:
+    # Fallback if the wrong 'jwt' package is installed
+    JWT_ERRORS = (Exception,)
 
 settings = get_settings()
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
@@ -17,7 +23,6 @@ def normalize_email(email: str) -> str:
 
 
 def get_password_hash(password: str) -> str:
-    # Bcrypt has a 72-byte limitation; truncate if necessary
     password_bytes = password.encode('utf-8')
     if len(password_bytes) > 72:
         password = password_bytes[:72].decode('utf-8', errors='ignore')
@@ -44,5 +49,5 @@ def create_access_token(subject: str, claims: dict | None = None) -> str:
 def decode_access_token(token: str) -> dict | None:
     try:
         return jwt.decode(token, settings.SECRET_KEY, algorithms=[ALGORITHM])
-    except (PyJWTError, ExpiredSignatureError, DecodeError):
+    except JWT_ERRORS:
         return None
