@@ -12,8 +12,6 @@ from app.routers import (
     users, vehicles,
 )
 from app.scripts.seed_superadmin import update_password
-from app.scripts.seed_tenant_admins import seed_tenant_admin_passwords
-from app.scripts.seed_tenant_policies import seed_policies_for_existing_tenants
 
 app = FastAPI(title="Rental Manager", version="1.0.0")
 
@@ -32,8 +30,6 @@ async def lifespan(app: FastAPI):
     print("Running seed initialization...")
     try:
         update_password()
-        seed_tenant_admin_passwords()
-        seed_policies_for_existing_tenants()
         print("Seed initialization completed.")
     except Exception as e:
         print(f"Warning: Seed initialization encountered an error: {e}")
