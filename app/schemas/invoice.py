@@ -1,20 +1,16 @@
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-
 from pydantic import BaseModel
-
 from app.models.invoices import InvoiceStatus
 
-
 class InvoiceCreate(BaseModel):
-    tenant_id: int
-    subscription_id: Optional[int] = None
+    booking_id: Optional[int] = None       # NEW: Link to booking
+    subscription_id: Optional[int] = None  # Keep for super-admin subscription billing
     amount_due: Decimal
     currency_code: str = "KES"
     due_date: datetime
     notes: Optional[str] = None
-
 
 class InvoiceUpdate(BaseModel):
     amount_due: Optional[Decimal] = None
@@ -22,10 +18,10 @@ class InvoiceUpdate(BaseModel):
     due_date: Optional[datetime] = None
     notes: Optional[str] = None
 
-
 class InvoiceOut(BaseModel):
     id: int
     tenant_id: int
+    booking_id: Optional[int] = None       # NEW
     subscription_id: Optional[int] = None
     invoice_number: str
     status: InvoiceStatus

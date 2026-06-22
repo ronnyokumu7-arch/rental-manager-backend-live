@@ -1,12 +1,13 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.rbac import require_role
+from app.dependencies.subscription import require_active_subscription
+from app.models.bookings import Booking
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.tenants import Tenant
 from app.models.users import User, UserRole
@@ -14,12 +15,9 @@ from app.schemas.invoice import InvoiceCreate, InvoiceOut, InvoiceUpdate
 from app.services.email import send_invoice_notification
 from app.services.pdf import generate_invoice_pdf
 
-
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
-# The Bouncer
 super_admin_only = Depends(require_role([UserRole.super_admin]))
-
 
 # ---------------------------------------------------------------------------
 # Business Logic Helpers
@@ -33,7 +31,6 @@ def _get_authorized_invoice(invoice_id: int, user: User, db: Session) -> Invoice
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Invoice not found",
         )
-    
     # Super admins see all, regular users only their own
     if user.role != UserRole.super_admin and invoice.tenant_id != user.tenant_id:
         raise HTTPException(
@@ -41,7 +38,6 @@ def _get_authorized_invoice(invoice_id: int, user: User, db: Session) -> Invoice
             detail="You can only access your own invoices",
         )
     return invoice
-
 
 def _generate_invoice_number(tenant_id: int, db: Session) -> str:
     year = datetime.now(timezone.utc).year
@@ -51,7 +47,6 @@ def _generate_invoice_number(tenant_id: int, db: Session) -> str:
     sequence = str(count + 1).zfill(4)
     return f"{tenant_id}-{year}-{sequence}"
 
-
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -60,11 +55,22 @@ def _generate_invoice_number(tenant_id: int, db: Session) -> str:
 def create_invoice(
     payload: InvoiceCreate,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(require_active_subscription),
 ):
-    invoice_number = _generate_invoice_number(payload.tenant_id, db)
+    # If linking to a booking, verify the tenant owns the booking
+    if payload.booking_id:
+        booking = db.query(Booking).filter(
+            Booking.id == payload.booking_id,
+            Booking.tenant_id == current_user.tenant_id
+        ).first()
+        if not booking:
+            raise HTTPException(status_code=404, detail="Booking not found or access denied")
+
+    invoice_number = _generate_invoice_number(current_user.tenant_id, db)
+    
     db_invoice = Invoice(
         **payload.model_dump(),
+        tenant_id=current_user.tenant_id,
         invoice_number=invoice_number,
         status=InvoiceStatus.draft,
         amount_paid=Decimal("0"),
@@ -73,7 +79,6 @@ def create_invoice(
     db.commit()
     db.refresh(db_invoice)
     return db_invoice
-
 
 @router.get("/", response_model=list[InvoiceOut])
 def list_invoices(
@@ -88,7 +93,6 @@ def list_invoices(
         query = query.filter(Invoice.status == invoice_status)
     return query.order_by(Invoice.created_at.desc()).all()
 
-
 @router.get("/{invoice_id}", response_model=InvoiceOut)
 def get_invoice(
     invoice_id: int,
@@ -97,18 +101,14 @@ def get_invoice(
 ):
     return _get_authorized_invoice(invoice_id, current_user, db)
 
-
 @router.patch("/{invoice_id}", response_model=InvoiceOut)
 def update_invoice(
     invoice_id: int,
     payload: InvoiceUpdate,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(require_active_subscription),
 ):
-    # For super_admin updates, we just need to verify existence (no ownership check needed for super admins)
-    # Reusing helper is safe if we pass the current_user
     invoice = _get_authorized_invoice(invoice_id, current_user, db)
-    
     if invoice.status in (InvoiceStatus.paid, InvoiceStatus.void):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -122,15 +122,13 @@ def update_invoice(
     db.refresh(invoice)
     return invoice
 
-
 @router.post("/{invoice_id}/send", response_model=InvoiceOut)
 def send_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(require_active_subscription),
 ):
     invoice = _get_authorized_invoice(invoice_id, current_user, db)
-    
     if invoice.status != InvoiceStatus.draft:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -140,7 +138,7 @@ def send_invoice(
     invoice.status = InvoiceStatus.sent
     db.commit()
     db.refresh(invoice)
-    
+
     tenant = db.query(Tenant).filter(Tenant.id == invoice.tenant_id).first()
     if tenant:
         send_invoice_notification(
@@ -153,15 +151,13 @@ def send_invoice(
         )
     return invoice
 
-
 @router.post("/{invoice_id}/void", response_model=InvoiceOut)
 def void_invoice(
     invoice_id: int,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(require_active_subscription),
 ):
     invoice = _get_authorized_invoice(invoice_id, current_user, db)
-    
     if invoice.status == InvoiceStatus.paid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -178,7 +174,6 @@ def void_invoice(
     db.refresh(invoice)
     return invoice
 
-
 @router.get("/{invoice_id}/pdf")
 def get_invoice_pdf(
     invoice_id: int,
@@ -186,7 +181,6 @@ def get_invoice_pdf(
     current_user: User = Depends(get_current_user),
 ):
     invoice = _get_authorized_invoice(invoice_id, current_user, db)
-    
     pdf_bytes = generate_invoice_pdf(invoice, db)
 
     return Response(

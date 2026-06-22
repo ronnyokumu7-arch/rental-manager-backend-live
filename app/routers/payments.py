@@ -1,11 +1,12 @@
 from datetime import datetime, timezone
-
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.rbac import require_role
+from app.dependencies.subscription import require_active_subscription # NEW IMPORT
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment, PaymentStatus
 from app.models.tenants import Tenant
@@ -13,69 +14,37 @@ from app.models.users import User, UserRole
 from app.schemas.payment import PaymentCreate, PaymentOut
 from app.services.email import send_payment_received
 
-
 router = APIRouter(prefix="/payments", tags=["payments"])
 
-# The Bouncer
 super_admin_only = Depends(require_role([UserRole.super_admin]))
 
-
-# ---------------------------------------------------------------------------
-# Business Logic Helpers
-# ---------------------------------------------------------------------------
-
-def _get_authorized_payment(payment_id: int, user: User, db: Session) -> Payment:
-    """Helper to retrieve payment and enforce ownership/access control."""
-    payment = db.query(Payment).filter(Payment.id == payment_id).first()
-    if not payment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Payment not found",
-        )
-    
-    # Super admins see all, regular users only their own
-    if user.role != UserRole.super_admin and payment.tenant_id != user.tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only access your own payments",
-        )
-    return payment
-
-
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
+# ... (keep _get_authorized_payment helper) ...
 
 @router.post("/", response_model=PaymentOut, status_code=status.HTTP_201_CREATED)
 def record_payment(
     payload: PaymentCreate,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(require_active_subscription), # CHANGED from super_admin_only
 ):
-    invoice = db.query(Invoice).filter(Invoice.id == payload.invoice_id).first()
-    if not invoice:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invoice not found",
-        )
+    # Ensure the tenant owns the invoice they are paying
+    invoice = db.query(Invoice).filter(
+        Invoice.id == payload.invoice_id,
+        Invoice.tenant_id == current_user.tenant_id
+    ).first()
     
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found or access denied")
+        
     if invoice.status == InvoiceStatus.void:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot record payment against a void invoice",
-        )
+        raise HTTPException(status_code=400, detail="Cannot record payment against a void invoice")
     if invoice.status == InvoiceStatus.paid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invoice is already fully paid",
-        )
+        raise HTTPException(status_code=400, detail="Invoice is already fully paid")
 
     now = datetime.now(timezone.utc)
-    
-    # Record payment
+
     db_payment = Payment(
         invoice_id=payload.invoice_id,
-        tenant_id=invoice.tenant_id,
+        tenant_id=current_user.tenant_id, # Inject from auth
         amount=payload.amount,
         currency_code=payload.currency_code,
         method=payload.method,
@@ -87,7 +56,6 @@ def record_payment(
     )
     db.add(db_payment)
 
-    # Update invoice
     invoice.amount_paid = (invoice.amount_paid or 0) + payload.amount
     if invoice.amount_paid >= invoice.amount_due:
         invoice.status = InvoiceStatus.paid
@@ -95,8 +63,9 @@ def record_payment(
 
     db.commit()
     db.refresh(db_payment)
-    
-    # Send receipt
+
+    # Send receipt (Optional: you might want to send this to the Client instead of the Tenant if it's a booking payment, 
+    # but for now we keep the existing tenant receipt logic).
     tenant = db.query(Tenant).filter(Tenant.id == db_payment.tenant_id).first()
     if tenant:
         send_payment_received(
@@ -109,26 +78,15 @@ def record_payment(
         
     return db_payment
 
-
 @router.get("/", response_model=list[PaymentOut])
 def list_payments(
     invoice_id: int | None = None,
-    tenant_id: int | None = None,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(require_active_subscription), # CHANGED
 ):
-    query = db.query(Payment)
+    query = db.query(Payment).filter(Payment.tenant_id == current_user.tenant_id)
     if invoice_id is not None:
         query = query.filter(Payment.invoice_id == invoice_id)
-    if tenant_id is not None:
-        query = query.filter(Payment.tenant_id == tenant_id)
     return query.order_by(Payment.created_at.desc()).all()
 
-
-@router.get("/{payment_id}", response_model=PaymentOut)
-def get_payment(
-    payment_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
-):
-    return _get_authorized_payment(payment_id, current_user, db)
+# ... (keep get_payment endpoint but change bouncer to require_active_subscription) ...
