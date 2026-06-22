@@ -16,17 +16,18 @@ from app.scripts.seed_tenant_admins import seed_tenant_admin_passwords
 from app.scripts.seed_tenant_policies import seed_policies_for_existing_tenants
 
 
-# --- TEMPORARY ALEMBIC REPAIR ---
 import os
-if os.environ.get("RENDER") == "true":
-    try:
-        from alembic.config import Config
-        from alembic import command
-        cfg = Config("alembic.ini")
-        command.stamp(cfg, "head")
-        print("✅ Auto-repaired Alembic version.")
-    except Exception as e:
-        print(f"⚠️ Alembic repair skipped: {e}")
+
+# --- TEMPORARY ALEMBIC REPAIR ---
+try:
+    from alembic.config import Config
+    from alembic import command
+    cfg = Config("alembic.ini")
+    # This forces the database to align with the current code state
+    command.stamp(cfg, "head")
+    print("✅ Database version stamped to HEAD (Auto-Repair).")
+except Exception as e:
+    print(f"⚠️ Alembic repair skipped: {e}")
 # --------------------------------
 
 
