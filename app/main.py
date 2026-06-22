@@ -15,6 +15,21 @@ from app.scripts.seed_superadmin import update_password
 from app.scripts.seed_tenant_admins import seed_tenant_admin_passwords
 from app.scripts.seed_tenant_policies import seed_policies_for_existing_tenants
 
+
+# --- TEMPORARY ALEMBIC REPAIR ---
+import os
+if os.environ.get("RENDER") == "true":
+    try:
+        from alembic.config import Config
+        from alembic import command
+        cfg = Config("alembic.ini")
+        command.stamp(cfg, "head")
+        print("✅ Auto-repaired Alembic version.")
+    except Exception as e:
+        print(f"⚠️ Alembic repair skipped: {e}")
+# --------------------------------
+
+
 app = FastAPI(title="Rental Manager", version="1.0.0")
 
 from fastapi.staticfiles import StaticFiles

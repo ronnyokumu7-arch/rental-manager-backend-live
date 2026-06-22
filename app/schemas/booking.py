@@ -11,6 +11,9 @@ class BookingBase(BaseModel):
     vehicle_id: int
     start_date: date
     end_date: date
+    destination: Optional[str] = None
+    pickup_location: Optional[str] = None
+    return_location: Optional[str] = None
     total_amount: int = Field(gt=0)
     currency_code: str = Field(default="KES", min_length=3, max_length=3)
 
@@ -26,8 +29,11 @@ class BookingCreate(BookingBase):
 
 
 class BookingUpdate(BaseModel):
+    destination: Optional[str] = None
     start_date: Optional[date] = None
     end_date: Optional[date] = None
+    pickup_location: Optional[str] = None
+    return_location: Optional[str] = None
     total_amount: Optional[int] = Field(default=None, gt=0)
     currency_code: Optional[str] = Field(default=None, min_length=3, max_length=3)
     status: Optional[BookingStatus] = None
@@ -44,6 +50,9 @@ class BookingOut(BaseModel):
     tenant_id: int
     client_id: int
     vehicle_id: int
+    destination: Optional[str] = None
+    pickup_location: Optional[str] = None
+    return_location: Optional[str] = None
     start_date: date
     end_date: date
     total_amount: int
