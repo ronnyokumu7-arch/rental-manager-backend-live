@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     from_name: str = "Rental Manager"
     superadmin_password: str = "changeme"
     tenant_admin_password: str = "changeme"
-    frontend_url: str = "http://localhost:3002"
+    frontend_url: str = "http://localhost:3000"
     uploads_dir: str = "./uploads"
     db_server: str = "localhost"
     public_url_base: str = "https://rental-manager-backend-sf4k.onrender.com/uploads"
