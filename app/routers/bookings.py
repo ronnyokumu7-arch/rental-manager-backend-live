@@ -76,16 +76,21 @@ def confirm_booking(booking_id: int, db: Session = Depends(get_db), current_user
 
 # 3. GENERATE QUOTATION LINK
 @router.post("/{booking_id}/quote-link", response_model=dict)
-def generate_quote_link(booking_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_active_subscription)):
+def generate_quote_link(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_subscription),
+):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.pending:
         raise HTTPException(400, "Can only generate quotes for pending bookings")
+    
     if not booking.share_token:
         booking.share_token = str(uuid.uuid4())
         db.commit()
+    
     base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     return {"share_url": f"{base_url}/quote/{booking.share_token}"}
-
 # 4. PUBLIC: VIEW QUOTATION
 @router.get("/public/{token}")
 def view_public_quote(token: str, db: Session = Depends(get_db)):
@@ -93,57 +98,55 @@ def view_public_quote(token: str, db: Session = Depends(get_db)):
     if not booking: 
         raise HTTPException(404, "Quotation not found")
     
-    # ✅ NEW EXPIRY LOGIC: 7 days from when the quote was sent (or created)
-    sent_at = booking.quotation_sent_at or booking.created_at
-    expiry_limit = sent_at + timedelta(days=7)
+    # ✅ CONSISTENT EXPIRY: End of booking's start date (23:59:59)
+    expiry_limit = booking.start_date.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
     
     if datetime.now(timezone.utc) > expiry_limit: 
         raise HTTPException(status_code=410, detail="This quotation has expired.")
-        
     if booking.status != BookingStatus.pending: 
         raise HTTPException(status_code=410, detail="This quotation is no longer valid.")
-        
+    
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
     tenant = db.query(Tenant).filter(Tenant.id == booking.tenant_id).first()
 
     return {
-         "tenant_name": tenant.name if tenant else "Unknown Agency",
-         "client_name": client.full_name if client else "Valued Client",
-         "vehicle_details": f"{vehicle.make} {vehicle.model} ({vehicle.plate_number})" if vehicle else "Unknown Vehicle",
-         "start_date": str(booking.start_date), 
-         "end_date": str(booking.end_date),
-         "pickup_location": booking.pickup_location, 
-         "return_location": booking.return_location,
-         "total_amount": str(booking.total_amount), 
-         "currency_code": booking.currency_code,
-         "expires_at": str(expiry_limit),
+        "id": booking.id,
+        "tenant_name": tenant.name if tenant else "Unknown Agency",
+        "client_name": client.full_name if client else "Valued Client",
+        "vehicle_details": f"{vehicle.make} {vehicle.model} ({vehicle.plate_number})" if vehicle else "Unknown Vehicle",
+        "start_date": str(booking.start_date),
+        "end_date": str(booking.end_date),
+        "pickup_location": booking.pickup_location,
+        "return_location": booking.return_location,
+        "total_amount": str(booking.total_amount),
+        "currency_code": booking.currency_code,
+        "expires_at": expiry_limit.isoformat(),  # ✅ Send correct expiry to frontend
+        "status": booking.status.value,
     }
-
+    
 # 5. PUBLIC: ACCEPT QUOTATION
 @router.post("/public/{token}/accept")
 def accept_public_quote(token: str, db: Session = Depends(get_db)):
     booking = db.query(Booking).filter(Booking.share_token == token).first()
-    if not booking: 
+    if not booking:
         raise HTTPException(404, "Quotation not found")
     
-    # ✅ NEW EXPIRY LOGIC: 7 days from when the quote was sent (or created)
-    sent_at = booking.quotation_sent_at or booking.created_at
-    expiry_limit = sent_at + timedelta(days=7)
+    # ✅ SAME EXPIRY LOGIC as view endpoint
+    expiry_limit = booking.start_date.replace(hour=23, minute=59, second=59, tzinfo=timezone.utc)
     
-    if datetime.now(timezone.utc) > expiry_limit: 
+    if datetime.now(timezone.utc) > expiry_limit:
         raise HTTPException(410, "This quotation has expired.")
-        
-    if booking.status != BookingStatus.pending: 
+    if booking.status != BookingStatus.pending:
         raise HTTPException(400, "This quotation has already been processed.")
-        
+    
+    # Accept: Change status and auto-generate Contract + Invoice
     booking.status = BookingStatus.confirmed
     create_contract_for_booking(booking, db)
     create_invoice_for_booking(booking, db)
     db.commit()
-    
     return {"message": "Quotation accepted successfully. Booking confirmed."}
-
+    
 # 6. ACTIVATE, COMPLETE, CANCEL, NO-SHOW, ARCHIVE, RESTORE, DELETE
 # (Keep your existing status transition endpoints exactly as they were in your uploaded file, they are correct)
 @router.post("/{booking_id}/activate", response_model=BookingOut)
