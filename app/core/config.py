@@ -20,7 +20,7 @@ class Settings(BaseSettings):
     frontend_url: str = "http://localhost:3000"
     uploads_dir: str = "./uploads"
     db_server: str = "localhost"
-    public_url_base: str = "https://rental-manager-backend-sf4k.onrender.com/uploads"
+    public_url_base: str = "https://rental-manager-backend-071n.onrender.com/uploads"
 
     model_config = {
         "env_file": ".env",
