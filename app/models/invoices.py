@@ -33,6 +33,10 @@ class Invoice(Base):
     
     notes = Column(String(500), nullable=True)
     pdf_path = Column(String(500), nullable=True) # For future PDF storage
+        
+    # Add after pdf_path column
+    share_token = Column(String(36), unique=True, nullable=True, index=True)
+    share_token_expires_at = Column(DateTime(timezone=True), nullable=True)
     
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
