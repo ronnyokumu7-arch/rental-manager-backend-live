@@ -1,10 +1,7 @@
 from datetime import date, datetime
 from typing import Optional
-
 from pydantic import BaseModel, Field, model_validator
-
 from app.models.bookings import BookingStatus
-
 
 class BookingBase(BaseModel):
     client_id: int
@@ -23,10 +20,8 @@ class BookingBase(BaseModel):
             raise ValueError("end_date must be after start_date")
         return self
 
-
 class BookingCreate(BookingBase):
     pass
-
 
 class BookingUpdate(BaseModel):
     destination: Optional[str] = None
@@ -44,7 +39,6 @@ class BookingUpdate(BaseModel):
             raise ValueError("end_date must be after start_date")
         return self
 
-
 class BookingOut(BaseModel):
     id: int
     tenant_id: int
@@ -59,11 +53,9 @@ class BookingOut(BaseModel):
     currency_code: str
     status: BookingStatus
     
-    # ✅ ADD THESE MISSING FIELDS
+    # Added for frontend filtering
     is_archived: bool = False
     archived_at: Optional[datetime] = None
-    share_token: Optional[str] = None
-    share_token_expires_at: Optional[datetime] = None
     
     created_at: datetime
     updated_at: datetime
