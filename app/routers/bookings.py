@@ -109,16 +109,16 @@ def view_public_quote(token: str, db: Session = Depends(get_db)):
     tenant = db.query(Tenant).filter(Tenant.id == booking.tenant_id).first()
 
     return {
-        "tenant_name": tenant.name if tenant else "Unknown Agency",
-        "client_name": client.full_name if client else "Valued Client",
-        "vehicle_details": f"{vehicle.make} {vehicle.model} ({vehicle.plate_number})" if vehicle else "Unknown Vehicle",
-        "start_date": str(booking.start_date), 
-        "end_date": str(booking.end_date),
-        "pickup_location": booking.pickup_location, 
-        "return_location": booking.return_location,
-        "total_amount": str(booking.total_amount), 
-        "currency_code": booking.currency_code,
-        "expires_at": str(expiry_limit),
+         "tenant_name": tenant.name if tenant else "Unknown Agency",
+         "client_name": client.full_name if client else "Valued Client",
+         "vehicle_details": f"{vehicle.make} {vehicle.model} ({vehicle.plate_number})" if vehicle else "Unknown Vehicle",
+         "start_date": str(booking.start_date), 
+         "end_date": str(booking.end_date),
+         "pickup_location": booking.pickup_location, 
+         "return_location": booking.return_location,
+         "total_amount": str(booking.total_amount), 
+         "currency_code": booking.currency_code,
+         "expires_at": str(expiry_limit),
     }
 
 # 5. PUBLIC: ACCEPT QUOTATION
@@ -127,7 +127,7 @@ def accept_public_quote(token: str, db: Session = Depends(get_db)):
     booking = db.query(Booking).filter(Booking.share_token == token).first()
     if not booking: 
         raise HTTPException(404, "Quotation not found")
-        
+    
     # ✅ NEW EXPIRY LOGIC: 7 days from when the quote was sent (or created)
     sent_at = booking.quotation_sent_at or booking.created_at
     expiry_limit = sent_at + timedelta(days=7)
