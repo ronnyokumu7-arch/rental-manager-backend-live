@@ -21,7 +21,7 @@ def update_password():
         if not user:
             # CREATE: Only runs once when the user doesn't exist
             user = User(
-                full_name="Super Admin",
+                full_name="Ronny Okumu",
                 email=email,
                 password_hash=get_password_hash(password),
                 role=UserRole.super_admin,
