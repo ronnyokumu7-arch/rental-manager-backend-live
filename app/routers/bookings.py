@@ -82,7 +82,6 @@ def generate_quote_link(booking_id: int, db: Session = Depends(get_db), current_
         raise HTTPException(400, "Can only generate quotes for pending bookings")
     if not booking.share_token:
         booking.share_token = str(uuid.uuid4())
-        booking.quotation_sent_at = datetime.now(timezone.utc)
         db.commit()
     base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     return {"share_url": f"{base_url}/quote/{booking.share_token}"}

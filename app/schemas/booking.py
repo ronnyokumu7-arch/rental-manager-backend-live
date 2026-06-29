@@ -58,13 +58,14 @@ class BookingOut(BaseModel):
     total_amount: int
     currency_code: str
     status: BookingStatus
+    
+    # ✅ ADD THESE MISSING FIELDS
     is_archived: bool = False
     archived_at: Optional[datetime] = None
-    
-    # ✅ ADD THESE TWO LINES
     share_token: Optional[str] = None
-    quotation_sent_at: Optional[datetime] = None
+    share_token_expires_at: Optional[datetime] = None
     
     created_at: datetime
     updated_at: datetime
+
     model_config = {"from_attributes": True}
