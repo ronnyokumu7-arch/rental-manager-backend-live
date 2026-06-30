@@ -38,9 +38,6 @@ class Booking(Base):
     is_archived = Column(Boolean, default=False, nullable=False)
     archived_at = Column(DateTime(timezone=True), nullable=True)
     
-    # Quotation Link
-    quotation_id = Column(Integer, ForeignKey("quotations.id", ondelete="SET NULL"), nullable=True)
-    
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -51,4 +48,4 @@ class Booking(Base):
     vehicle = relationship("Vehicle", back_populates="bookings")
     contract = relationship("Contract", back_populates="booking", uselist=False)
     invoices = relationship("Invoice", back_populates="booking", cascade="all, delete-orphan")
-    quotation = relationship("Quotation", foreign_keys=[quotation_id], back_populates="booking", uselist=False)
+    quotation = relationship("Quotation", back_populates="booking", uselist=False)

@@ -59,7 +59,6 @@ class BookingOut(BaseModel):
     currency_code: str
     status: BookingStatus
     is_archived: bool
-    quotation_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
