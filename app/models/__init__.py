@@ -4,6 +4,7 @@ from app.models.contracts import Contract
 from app.models.invoices import Invoice
 from app.models.password_reset import PasswordResetToken
 from app.models.payments import Payment
+from app.models.quotations import Quotation  # ✅ ADD THIS
 from app.models.subscriptions import Subscription
 from app.models.tenant_policies import TenantPolicy
 from app.models.tenant_profile import TenantProfile
@@ -18,6 +19,7 @@ __all__ = [
     "Invoice",
     "PasswordResetToken",
     "Payment",
+    "Quotation",  # ✅ ADD THIS
     "Subscription",
     "TenantPolicy",
     "TenantProfile",

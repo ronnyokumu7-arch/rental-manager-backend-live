@@ -28,7 +28,7 @@ class Booking(Base):
     end_date = Column(Date, nullable=False)
     
     total_amount = Column(Integer, nullable=False)
-    currency_code = Column(String(3), nullable=False, default="KES", server_default="KES")
+    currency_code = Column(String(3), nullable=False, default="KES")
     
     status = Column(
         Enum(BookingStatus),
@@ -42,13 +42,11 @@ class Booking(Base):
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
-    
-    share_token = Column(String(36), unique=True, nullable=True, index=True)
-    share_token_expires_at = Column(DateTime(timezone=True), nullable=True)
 
     # Relationships (Cleaned)
     tenant = relationship("Tenant", back_populates="bookings")
     client = relationship("Client", back_populates="bookings")
     vehicle = relationship("Vehicle", back_populates="bookings")
-    contract = relationship("Contract", back_populates="booking", uselist=False, cascade="all, delete-orphan")
+    contract = relationship("Contract", back_populates="booking", uselist=False)
     invoices = relationship("Invoice", back_populates="booking", cascade="all, delete-orphan")
+    quotation = relationship("Quotation", back_populates="booking")

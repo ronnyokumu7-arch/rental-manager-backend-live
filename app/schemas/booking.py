@@ -3,7 +3,6 @@ from typing import Optional
 from pydantic import BaseModel, Field, model_validator
 from app.models.bookings import BookingStatus
 
-
 class BookingBase(BaseModel):
     client_id: int
     vehicle_id: int
@@ -21,10 +20,8 @@ class BookingBase(BaseModel):
             raise ValueError("end_date must be after start_date")
         return self
 
-
 class BookingCreate(BookingBase):
     pass
-
 
 class BookingUpdate(BaseModel):
     destination: Optional[str] = None
@@ -42,7 +39,6 @@ class BookingUpdate(BaseModel):
             raise ValueError("end_date must be after start_date")
         return self
 
-
 class BookingOut(BaseModel):
     id: int
     tenant_id: int
@@ -58,11 +54,6 @@ class BookingOut(BaseModel):
     status: BookingStatus
     is_archived: bool = False
     archived_at: Optional[datetime] = None
-    
-    # Quotation tracking fields
-    share_token: Optional[str] = None
-    quotation_sent_at: Optional[datetime] = None
-    
     created_at: datetime
     updated_at: datetime
 

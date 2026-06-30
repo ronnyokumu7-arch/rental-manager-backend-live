@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+from app.routers import quotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -81,8 +82,9 @@ routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports
+    admin, reports, quotations
 ]
 
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
+    app.include_router(quotations.router, prefix="/api/v1")

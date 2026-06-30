@@ -1,5 +1,5 @@
 import enum
-from sqlalchemy import Boolean, Column, DateTime, Enum, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -37,7 +37,7 @@ class Tenant(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
-    # Relationships (Cleaned)
+    # Relationships
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
     clients = relationship("Client", back_populates="tenant", cascade="all, delete-orphan")
     vehicles = relationship("Vehicle", back_populates="tenant", cascade="all, delete-orphan")
@@ -48,3 +48,4 @@ class Tenant(Base):
     profile = relationship("TenantProfile", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
     policies = relationship("TenantPolicy", back_populates="tenant", cascade="all, delete-orphan")
     contracts = relationship("Contract", back_populates="tenant", cascade="all, delete-orphan")
+    quotations = relationship("Quotation", back_populates="tenant", cascade="all, delete-orphan")
