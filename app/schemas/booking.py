@@ -1,4 +1,5 @@
-from datetime import date, datetime
+from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, Field, model_validator
 from app.models.bookings import BookingStatus
@@ -6,37 +7,41 @@ from app.models.bookings import BookingStatus
 class BookingBase(BaseModel):
     client_id: int
     vehicle_id: int
-    start_date: date
-    end_date: date
-    destination: Optional[str] = None
+    start_date: datetime
+    end_date: datetime
     pickup_location: Optional[str] = None
     return_location: Optional[str] = None
-    total_amount: int = Field(gt=0)
+    destination: Optional[str] = None
+    daily_rate: Optional[Decimal] = None
+    total_amount: Decimal = Field(gt=0)
     currency_code: str = Field(default="KES", min_length=3, max_length=3)
 
     @model_validator(mode="after")
-    def end_date_must_be_after_start_date(self) -> "BookingBase":
+    def check_dates(self):
         if self.end_date <= self.start_date:
-            raise ValueError("end_date must be after start_date")
+            raise ValueError('End date must be after start date')
         return self
 
 class BookingCreate(BookingBase):
     pass
 
 class BookingUpdate(BaseModel):
-    destination: Optional[str] = None
-    start_date: Optional[date] = None
-    end_date: Optional[date] = None
+    client_id: Optional[int] = None
+    vehicle_id: Optional[int] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
     pickup_location: Optional[str] = None
     return_location: Optional[str] = None
-    total_amount: Optional[int] = Field(default=None, gt=0)
+    destination: Optional[str] = None
+    daily_rate: Optional[Decimal] = Field(default=None, gt=0)
+    total_amount: Optional[Decimal] = Field(default=None, gt=0)
     currency_code: Optional[str] = Field(default=None, min_length=3, max_length=3)
     status: Optional[BookingStatus] = None
 
     @model_validator(mode="after")
-    def end_date_must_be_after_start_date(self) -> "BookingUpdate":
+    def check_dates(self):
         if self.start_date and self.end_date and self.end_date <= self.start_date:
-            raise ValueError("end_date must be after start_date")
+            raise ValueError('End date must be after start date')
         return self
 
 class BookingOut(BaseModel):
@@ -44,16 +49,17 @@ class BookingOut(BaseModel):
     tenant_id: int
     client_id: int
     vehicle_id: int
-    destination: Optional[str] = None
+    start_date: datetime
+    end_date: datetime
     pickup_location: Optional[str] = None
     return_location: Optional[str] = None
-    start_date: date
-    end_date: date
-    total_amount: int
+    destination: Optional[str] = None
+    daily_rate: Optional[Decimal] = None
+    total_amount: Decimal
     currency_code: str
     status: BookingStatus
-    is_archived: bool = False
-    archived_at: Optional[datetime] = None
+    is_archived: bool
+    quotation_id: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 

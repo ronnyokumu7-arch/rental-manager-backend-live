@@ -1,4 +1,6 @@
-from datetime import datetime, timezone
+import os
+import uuid
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -7,6 +9,7 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
 from app.models.bookings import Booking, BookingStatus
 from app.models.clients import Client, ClientStatus
+from app.models.quotations import Quotation, QuotationStatus
 from app.models.users import User
 from app.models.vehicles import Vehicle, VehicleStatus
 from app.schemas.booking import BookingCreate, BookingOut, BookingUpdate
@@ -30,9 +33,6 @@ def _get_booking_or_404(booking_id: int, tenant_id: int, db: Session) -> Booking
         raise HTTPException(status_code=404, detail="Booking not found")
     return booking
 
-# ---------------------------------------------------------------------------
-# LIST BOOKINGS
-# ---------------------------------------------------------------------------
 @router.get("/", response_model=list[BookingOut])
 def list_bookings(
     db: Session = Depends(get_db),
@@ -53,9 +53,6 @@ def list_archived_bookings(
         Booking.is_archived == True,
     ).order_by(Booking.archived_at.desc()).all()
 
-# ---------------------------------------------------------------------------
-# GET SINGLE BOOKING
-# ---------------------------------------------------------------------------
 @router.get("/{booking_id}", response_model=BookingOut)
 def get_booking(
     booking_id: int,
@@ -64,9 +61,6 @@ def get_booking(
 ):
     return _get_booking_or_404(booking_id, current_user.tenant_id, db)
 
-# ---------------------------------------------------------------------------
-# CREATE BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
 def create_booking(
     booking: BookingCreate,
@@ -88,40 +82,89 @@ def create_booking(
     ).first()
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found.")
-    if vehicle.status != VehicleStatus.available or vehicle.is_archived:
-        raise HTTPException(status_code=409, detail="Vehicle is not available.")
 
-    db_booking = Booking(
-        **booking.model_dump(),
+    new_booking = Booking(
         tenant_id=current_user.tenant_id,
+        client_id=booking.client_id,
+        vehicle_id=booking.vehicle_id,
+        start_date=booking.start_date,
+        end_date=booking.end_date,
+        pickup_location=booking.pickup_location,
+        return_location=booking.return_location,
+        destination=booking.destination,
+        daily_rate=booking.daily_rate,
+        total_amount=booking.total_amount,
+        currency_code=booking.currency_code,
         status=BookingStatus.pending,
     )
-    db.add(db_booking)
+    db.add(new_booking)
     db.commit()
-    db.refresh(db_booking)
-    return db_booking
+    db.refresh(new_booking)
+    return new_booking
 
-# ---------------------------------------------------------------------------
-# UPDATE BOOKING
-# ---------------------------------------------------------------------------
 @router.patch("/{booking_id}", response_model=BookingOut)
 def update_booking(
     booking_id: int,
-    booking_update: BookingUpdate,
+    data: BookingUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
-    update_data = booking_update.model_dump(exclude_unset=True)
-    for field, value in update_data.items():
-        setattr(booking, field, value)
+    update_data = data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(booking, key, value)
     db.commit()
     db.refresh(booking)
     return booking
 
-# ---------------------------------------------------------------------------
-# CONFIRM BOOKING
-# ---------------------------------------------------------------------------
+@router.post("/{booking_id}/generate-quotation")
+def generate_quotation(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_subscription),
+):
+    booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
+    
+    if booking.status != BookingStatus.pending:
+        raise HTTPException(status_code=400, detail="Can only generate quotation for pending bookings")
+
+    # Check if quotation already exists
+    quotation = db.query(Quotation).filter(Quotation.booking_id == booking.id).first()
+    
+    if not quotation:
+        quotation = Quotation(
+            tenant_id=booking.tenant_id,
+            client_id=booking.client_id,
+            vehicle_id=booking.vehicle_id,
+            start_date=booking.start_date,
+            end_date=booking.end_date,
+            pickup_location=booking.pickup_location,
+            return_location=booking.return_location,
+            destination=booking.destination,
+            daily_rate=booking.daily_rate,
+            total_amount=booking.total_amount,
+            currency_code=booking.currency_code,
+            booking_id=booking.id,
+            share_token=str(uuid.uuid4()),
+            share_token_expires_at=datetime.now(timezone.utc) + timedelta(days=7)
+        )
+        db.add(quotation)
+    else:
+        if not quotation.share_token or (quotation.share_token_expires_at and quotation.share_token_expires_at < datetime.now(timezone.utc)):
+            quotation.share_token = str(uuid.uuid4())
+            quotation.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+            quotation.status = QuotationStatus.pending
+
+    db.commit()
+    db.refresh(quotation)
+    
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    return {
+        "share_url": f"{base_url}/quote/{quotation.share_token}",
+        "token": quotation.share_token,
+        "expires_at": quotation.share_token_expires_at
+    }
+
 @router.post("/{booking_id}/confirm", response_model=BookingOut)
 def confirm_booking(
     booking_id: int,
@@ -150,9 +193,6 @@ def confirm_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# ACTIVATE BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/activate", response_model=BookingOut)
 def activate_booking(
     booking_id: int,
@@ -186,9 +226,6 @@ def activate_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# COMPLETE BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/complete", response_model=BookingOut)
 def complete_booking(
     booking_id: int,
@@ -215,9 +252,6 @@ def complete_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# CANCEL BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/cancel", response_model=BookingOut)
 def cancel_booking(
     booking_id: int,
@@ -248,9 +282,6 @@ def cancel_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# NO-SHOW BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/no-show", response_model=BookingOut)
 def no_show_booking(
     booking_id: int,
@@ -266,9 +297,6 @@ def no_show_booking(
     db.refresh(booking)
     return booking
 
-# ---------------------------------------------------------------------------
-# ARCHIVE BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/archive", response_model=BookingOut)
 def archive_booking(
     booking_id: int,
@@ -287,28 +315,6 @@ def archive_booking(
     db.refresh(booking)
     return booking
 
-# ---------------------------------------------------------------------------
-# RESTORE BOOKING
-# ---------------------------------------------------------------------------
-@router.post("/{booking_id}/restore", response_model=BookingOut)
-def restore_booking(
-    booking_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
-):
-    booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
-    if not booking.is_archived:
-        raise HTTPException(400, "Booking is not archived")
-    
-    booking.is_archived = False
-    booking.archived_at = None
-    db.commit()
-    db.refresh(booking)
-    return booking
-
-# ---------------------------------------------------------------------------
-# DELETE BOOKING
-# ---------------------------------------------------------------------------
 @router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_booking(
     booking_id: int,
@@ -318,6 +324,5 @@ def delete_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status == BookingStatus.active:
         raise HTTPException(400, "Active bookings cannot be deleted.")
-    
     db.delete(booking)
     db.commit()

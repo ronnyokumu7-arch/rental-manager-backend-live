@@ -1,6 +1,6 @@
 import enum
 from datetime import datetime
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, Numeric, String
+from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -29,8 +29,12 @@ class Quotation(Base):
     destination = Column(String, nullable=True)
     
     # Financials
+    daily_rate = Column(Numeric(10, 2), nullable=True)
     total_amount = Column(Numeric(10, 2), nullable=False)
     currency_code = Column(String(3), default="KES", nullable=False)
+    
+    # Terms
+    terms_and_conditions = Column(String, nullable=True)
     
     # Sharing & Status
     status = Column(Enum(QuotationStatus), default=QuotationStatus.pending, nullable=False)
@@ -38,9 +42,10 @@ class Quotation(Base):
     share_token_expires_at = Column(DateTime(timezone=True), nullable=True)
     sent_at = Column(DateTime(timezone=True), server_default=func.now())
     
-    # Link to Booking (Created only when the client accepts the quote)
-    booking_id = Column(Integer, ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True)
+    # Link to Booking
+    booking_id = Column(Integer, ForeignKey("bookings.id", ondelete="SET NULL"), nullable=True, unique=True)
     
+    # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -48,4 +53,4 @@ class Quotation(Base):
     tenant = relationship("Tenant", back_populates="quotations")
     client = relationship("Client")
     vehicle = relationship("Vehicle")
-    booking = relationship("Booking", back_populates="quotation")
+    booking = relationship("Booking", back_populates="quotation", uselist=False)
