@@ -15,6 +15,9 @@ from app.routers import (
 )
 from app.scripts.seed_superadmin import update_password
 
+settings = get_settings()
+
+# 1. Modern Lifespan Manager (replaces @app.on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
@@ -27,19 +30,11 @@ async def lifespan(app: FastAPI):
     
     start_scheduler()
     yield
+    
     # Shutdown logic
     stop_scheduler()
 
-settings = get_settings()
-
-# CORS Configuration
-origins = [
-    "http://localhost:3000",  # Your local Next.js dev server
-    "http://localhost:3001",  # Just in case
-    "https://rental-manager-backend-071n.onrender.com",  # Your actual production backend URL
-    "https://your-frontend-domain.com",  # Your actual production frontend URL (add this later)
-]
-
+# 2. Initialize FastAPI App (SINGLE INITIALIZATION)
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -47,7 +42,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Add CORS middleware
+# 3. CORS Configuration
+# ⚠️ NOTE: These must be your FRONTEND URLs, not the backend URL.
+origins = [
+    "http://localhost:3000",       # Your local Next.js dev server
+    "http://localhost:3001",       # Just in case
+    "https://your-frontend-domain.com", # TODO: Add your actual deployed frontend URL here (e.g., Vercel URL)
+]
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -56,14 +58,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount the uploads directory for serving files
+# 4. Mount the uploads directory for serving files
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
 
-# Global Exception Handler
+# 5. Global Exception Handler
 app.add_exception_handler(HTTPException, http_exception_handler)
 
-# Health Check
+# 6. Health Check
 @app.get("/health", tags=["system"])
 def health_check():
     return {
@@ -71,12 +73,12 @@ def health_check():
         "environment": settings.environment,
     }
 
-# Include all routers ONCE
+# 7. Include Routers
 routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports, quotations  # ✅ Quotations included here ONLY
+    admin, reports, quotations # ✅ Quotations included here
 ]
 
 for router in routers:
