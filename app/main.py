@@ -43,6 +43,7 @@ app = FastAPI(
 origins = [
     "http://localhost:3000",       # Local Next.js dev server
     "http://localhost:3001",       # Alternative local port
+    "https://rental-manager-frontend.versel.app" #Change to your frontend URL
     "https://rental-manager-backend-071n.onrender.com", # Backend URL
 ]
 
