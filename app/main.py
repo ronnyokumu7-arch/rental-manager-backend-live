@@ -1,30 +1,20 @@
 from contextlib import asynccontextmanager
-from app.routers import quotations
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+import os
 
 from app.core.config import get_settings
 from app.core.exceptions import http_exception_handler
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.routers import (
     admin, auth, bookings, clients, contracts,
-    invoices, payments, reports, subscriptions,
-    tenant_policies, tenant_profile, tenants, 
+    invoices, payments, quotations, reports, subscriptions,
+    tenant_policies, tenant_profile, tenants,
     users, vehicles,
 )
 from app.scripts.seed_superadmin import update_password
 
-app = FastAPI(title="Rental Manager", version="1.0.0")
-
-from fastapi.staticfiles import StaticFiles
-import os
-
-# Mount the uploads directory for serving files
-if os.path.exists("./uploads"):
-    app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
-
-
-# 1. Modern Lifespan Manager (replaces @app.on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup logic
@@ -42,13 +32,13 @@ async def lifespan(app: FastAPI):
 
 settings = get_settings()
 
+# CORS Configuration
 origins = [
-    "http://localhost:3000",       # Your local Next.js dev server
-    "http://localhost:3001",       # Just in case
-    "https://rental-manager-backend-071n.onrender.com/api/v1", # Your actual production backend URL
-    "https://your-frontend-domain.com", # Your actual production frontend URL (add this later)
+    "http://localhost:3000",  # Your local Next.js dev server
+    "http://localhost:3001",  # Just in case
+    "https://rental-manager-backend-071n.onrender.com",  # Your actual production backend URL
+    "https://your-frontend-domain.com",  # Your actual production frontend URL (add this later)
 ]
-
 
 app = FastAPI(
     title=settings.app_name,
@@ -57,7 +47,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 2. Middleware
+# Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -66,10 +56,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Global Exception Handler
+# Mount the uploads directory for serving files
+if os.path.exists("./uploads"):
+    app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
+
+# Global Exception Handler
 app.add_exception_handler(HTTPException, http_exception_handler)
 
-# 4. Health Check
+# Health Check
 @app.get("/health", tags=["system"])
 def health_check():
     return {
@@ -77,14 +71,15 @@ def health_check():
         "environment": settings.environment,
     }
 
-# 5. Include Routers
+# Include all routers ONCE
 routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports, quotations
+    admin, reports, quotations  # ✅ Quotations included here ONLY
 ]
 
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
-    app.include_router(quotations.router, prefix="/api/v1")
+
+# ✅ REMOVED: Duplicate app.include_router(quotations.router, prefix="/api/v1")
