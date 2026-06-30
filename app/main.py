@@ -15,11 +15,10 @@ from app.routers import (
 )
 from app.scripts.seed_superadmin import update_password
 
-settings = get_settings()
-
-# 1. Modern Lifespan Manager
+# 1. Modern Lifespan Manager (replaces @app.on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup logic
     print("Running seed initialization...")
     try:
         update_password()
@@ -29,9 +28,20 @@ async def lifespan(app: FastAPI):
     
     start_scheduler()
     yield
+    
+    # Shutdown logic
     stop_scheduler()
 
-# 2. Initialize FastAPI App (SINGLE INITIALIZATION)
+settings = get_settings()
+
+# 2. CORS Configuration
+# ⚠️ IMPORTANT: These must be your FRONTEND URLs, NOT the backend URL with /api/v1!
+origins = [
+    "http://localhost:3000",       # Your local Next.js dev server
+    "http://localhost:3001",       # Just in case
+    "https://rental-manager-backend-071n.onrender.com",  # ✅ Fixed: Removed /api/v1
+]
+
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -39,15 +49,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 3. CORS Configuration
-# ⚠️ CRITICAL: If your frontend is deployed (e.g., Vercel), you MUST add that exact URL below.
-origins = [
-    "http://localhost:3000",       # Local Next.js dev server
-    "http://localhost:3001",       # Alternative local port
-    "https://rental-manager-backend-071n.onrender.com", # Backend URL
-    # "https://your-actual-frontend-url.vercel.app", # <-- UNCOMMENT AND ADD YOUR DEPLOYED FRONTEND URL HERE
-]
-
+# 3. Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -56,14 +58,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 4. Mount the uploads directory for serving files
+# Mount the uploads directory for serving files
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
 
-# 5. Global Exception Handler
+# 4. Global Exception Handler
 app.add_exception_handler(HTTPException, http_exception_handler)
 
-# 6. Health Check
+# 5. Health Check
 @app.get("/health", tags=["system"])
 def health_check():
     return {
@@ -71,13 +73,15 @@ def health_check():
         "environment": settings.environment,
     }
 
-# 7. Include all routers ONCE
+# 6. Include all routers ONCE
 routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports, quotations
+    admin, reports, quotations  # ✅ Quotations included here ONLY
 ]
 
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
+
+# ✅ REMOVED: Duplicate app.include_router(quotations.router, prefix="/api/v1")
