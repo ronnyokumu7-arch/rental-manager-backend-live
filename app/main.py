@@ -17,10 +17,9 @@ from app.scripts.seed_superadmin import update_password
 
 settings = get_settings()
 
-# 1. Modern Lifespan Manager (replaces @app.on_event)
+# 1. Modern Lifespan Manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
     print("Running seed initialization...")
     try:
         update_password()
@@ -30,11 +29,9 @@ async def lifespan(app: FastAPI):
     
     start_scheduler()
     yield
-    
-    # Shutdown logic
     stop_scheduler()
 
-# 2. Initialize FastAPI App (SINGLE INITIALIZATION)
+# 2. Initialize FastAPI App (ONLY ONCE)
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -43,11 +40,12 @@ app = FastAPI(
 )
 
 # 3. CORS Configuration
-# ⚠️ NOTE: These must be your FRONTEND URLs, not the backend URL.
+# ⚠️ IMPORTANT: These must be your FRONTEND URLs, NOT the backend URL!
 origins = [
-    "http://localhost:3000",       # Your local Next.js dev server
-    "http://localhost:3001",       # Just in case
-    "https://your-frontend-domain.com", # TODO: Add your actual deployed frontend URL here (e.g., Vercel URL)
+    "http://localhost:3000",       # Local Next.js dev server
+    "http://localhost:3001",       # Alternative local port
+    "https://your-frontend-domain.vercel.app", # TODO: Replace with your actual deployed frontend URL (e.g., Vercel)
+    "https://rental-manager-backend-071n.onrender.com", # Backend URL (sometimes needed for internal calls)
 ]
 
 app.add_middleware(
@@ -73,15 +71,13 @@ def health_check():
         "environment": settings.environment,
     }
 
-# 7. Include Routers
+# 7. Include all routers ONCE
 routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports, quotations # ✅ Quotations included here
+    admin, reports, quotations
 ]
 
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
-
-# ✅ REMOVED: Duplicate app.include_router(quotations.router, prefix="/api/v1")
