@@ -53,4 +53,4 @@ class Quotation(Base):
     tenant = relationship("Tenant", back_populates="quotations")
     client = relationship("Client")
     vehicle = relationship("Vehicle")
-    booking = relationship("Booking", back_populates="quotation", uselist=False)
+    booking = relationship("Booking", foreign_keys=[booking_id], back_populates="quotation", uselist=False)

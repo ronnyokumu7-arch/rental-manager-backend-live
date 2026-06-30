@@ -51,4 +51,4 @@ class Booking(Base):
     vehicle = relationship("Vehicle", back_populates="bookings")
     contract = relationship("Contract", back_populates="booking", uselist=False)
     invoices = relationship("Invoice", back_populates="booking", cascade="all, delete-orphan")
-    quotation = relationship("Quotation", back_populates="booking", uselist=False)
+    quotation = relationship("Quotation", foreign_keys=[quotation_id], back_populates="booking", uselist=False)
