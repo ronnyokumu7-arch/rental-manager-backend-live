@@ -1,7 +1,9 @@
+# backend/app/routers/bookings.py
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -33,6 +35,9 @@ def _get_booking_or_404(booking_id: int, tenant_id: int, db: Session) -> Booking
         raise HTTPException(status_code=404, detail="Booking not found")
     return booking
 
+# ---------------------------------------------------------------------------
+# LIST BOOKINGS
+# ---------------------------------------------------------------------------
 @router.get("/", response_model=list[BookingOut])
 def list_bookings(
     db: Session = Depends(get_db),
@@ -53,6 +58,9 @@ def list_archived_bookings(
         Booking.is_archived == True,
     ).order_by(Booking.archived_at.desc()).all()
 
+# ---------------------------------------------------------------------------
+# GET SINGLE BOOKING
+# ---------------------------------------------------------------------------
 @router.get("/{booking_id}", response_model=BookingOut)
 def get_booking(
     booking_id: int,
@@ -61,6 +69,9 @@ def get_booking(
 ):
     return _get_booking_or_404(booking_id, current_user.tenant_id, db)
 
+# ---------------------------------------------------------------------------
+# CREATE BOOKING (With Custom BK-Number Generation)
+# ---------------------------------------------------------------------------
 @router.post("/", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
 def create_booking(
     booking: BookingCreate,
@@ -82,41 +93,63 @@ def create_booking(
     ).first()
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found.")
+    if vehicle.status != VehicleStatus.available or vehicle.is_archived:
+        raise HTTPException(status_code=409, detail="Vehicle is not available.")
 
-    new_booking = Booking(
+    # ✅ GENERATE CUSTOM BOOKING NUMBER (e.g., BK-010626)
+    now = datetime.now(timezone.utc)
+    current_month = now.month
+    current_year = now.year % 100
+    
+    # Find the last booking number for this specific month and year
+    prefix = f"BK-%{current_month:02d}{current_year:02d}"
+    last_booking = db.query(Booking.booking_number).filter(
+        Booking.booking_number.like(prefix)
+    ).order_by(Booking.booking_number.desc()).first()
+    
+    if last_booking and last_booking[0]:
+        # Extract counter from "BK-010626" -> "01" -> 1
+        last_counter = int(last_booking[0].split("-")[1][:2])
+        new_counter = last_counter + 1
+    else:
+        new_counter = 1
+        
+    new_booking_number = f"BK-{new_counter:02d}{current_month:02d}{current_year:02d}"
+
+    # Create the booking object
+    db_booking = Booking(
+        **booking.model_dump(),
         tenant_id=current_user.tenant_id,
-        client_id=booking.client_id,
-        vehicle_id=booking.vehicle_id,
-        start_date=booking.start_date,
-        end_date=booking.end_date,
-        pickup_location=booking.pickup_location,
-        return_location=booking.return_location,
-        destination=booking.destination,
-        daily_rate=booking.daily_rate,
-        total_amount=booking.total_amount,
-        currency_code=booking.currency_code,
         status=BookingStatus.pending,
+        booking_number=new_booking_number, # ✅ Assign the custom ID
     )
-    db.add(new_booking)
+    
+    db.add(db_booking)
     db.commit()
-    db.refresh(new_booking)
-    return new_booking
+    db.refresh(db_booking)
+    return db_booking
 
+# ---------------------------------------------------------------------------
+# UPDATE BOOKING
+# ---------------------------------------------------------------------------
 @router.patch("/{booking_id}", response_model=BookingOut)
 def update_booking(
     booking_id: int,
-    data: BookingUpdate,
+    booking_update: BookingUpdate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
-    update_data = data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(booking, key, value)
+    update_data = booking_update.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(booking, field, value)
     db.commit()
     db.refresh(booking)
     return booking
 
+# ---------------------------------------------------------------------------
+# GENERATE QUOTATION FROM BOOKING
+# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/generate-quotation")
 def generate_quotation(
     booking_id: int,
@@ -128,7 +161,7 @@ def generate_quotation(
     if booking.status != BookingStatus.pending:
         raise HTTPException(status_code=400, detail="Can only generate quotation for pending bookings")
 
-    # Check if quotation already exists
+    # Check if quotation already exists for this booking
     quotation = db.query(Quotation).filter(Quotation.booking_id == booking.id).first()
     
     if not quotation:
@@ -150,6 +183,7 @@ def generate_quotation(
         )
         db.add(quotation)
     else:
+        # Regenerate token if it was lost or expired
         if not quotation.share_token or (quotation.share_token_expires_at and quotation.share_token_expires_at < datetime.now(timezone.utc)):
             quotation.share_token = str(uuid.uuid4())
             quotation.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
@@ -165,6 +199,9 @@ def generate_quotation(
         "expires_at": quotation.share_token_expires_at
     }
 
+# ---------------------------------------------------------------------------
+# CONFIRM BOOKING
+# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/confirm", response_model=BookingOut)
 def confirm_booking(
     booking_id: int,
@@ -193,6 +230,9 @@ def confirm_booking(
         )
     return booking
 
+# ---------------------------------------------------------------------------
+# ACTIVATE BOOKING
+# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/activate", response_model=BookingOut)
 def activate_booking(
     booking_id: int,
@@ -226,6 +266,9 @@ def activate_booking(
         )
     return booking
 
+# ---------------------------------------------------------------------------
+# COMPLETE BOOKING
+# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/complete", response_model=BookingOut)
 def complete_booking(
     booking_id: int,
@@ -252,6 +295,9 @@ def complete_booking(
         )
     return booking
 
+# ---------------------------------------------------------------------------
+# CANCEL BOOKING
+# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/cancel", response_model=BookingOut)
 def cancel_booking(
     booking_id: int,
@@ -282,6 +328,9 @@ def cancel_booking(
         )
     return booking
 
+# ---------------------------------------------------------------------------
+# NO-SHOW BOOKING
+# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/no-show", response_model=BookingOut)
 def no_show_booking(
     booking_id: int,
@@ -297,6 +346,9 @@ def no_show_booking(
     db.refresh(booking)
     return booking
 
+# ---------------------------------------------------------------------------
+# ARCHIVE BOOKING
+# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/archive", response_model=BookingOut)
 def archive_booking(
     booking_id: int,
@@ -315,6 +367,28 @@ def archive_booking(
     db.refresh(booking)
     return booking
 
+# ---------------------------------------------------------------------------
+# RESTORE BOOKING
+# ---------------------------------------------------------------------------
+@router.post("/{booking_id}/restore", response_model=BookingOut)
+def restore_booking(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_subscription),
+):
+    booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
+    if not booking.is_archived:
+        raise HTTPException(400, "Booking is not archived")
+    
+    booking.is_archived = False
+    booking.archived_at = None
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+# ---------------------------------------------------------------------------
+# DELETE BOOKING
+# ---------------------------------------------------------------------------
 @router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_booking(
     booking_id: int,

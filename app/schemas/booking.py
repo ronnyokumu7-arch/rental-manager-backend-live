@@ -47,6 +47,7 @@ class BookingUpdate(BaseModel):
 # ✅ THE FIX: Forgiving Output Schema
 class BookingOut(BaseModel):
     id: int
+    booking_number: str
     tenant_id: int
     client_id: int
     vehicle_id: int
