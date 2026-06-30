@@ -31,7 +31,7 @@ async def lifespan(app: FastAPI):
     yield
     stop_scheduler()
 
-# 2. Initialize FastAPI App (ONLY ONCE)
+# 2. Initialize FastAPI App (SINGLE INITIALIZATION)
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -40,12 +40,12 @@ app = FastAPI(
 )
 
 # 3. CORS Configuration
-# ⚠️ IMPORTANT: These must be your FRONTEND URLs, NOT the backend URL!
+# ⚠️ CRITICAL: If your frontend is deployed (e.g., Vercel), you MUST add that exact URL below.
 origins = [
     "http://localhost:3000",       # Local Next.js dev server
     "http://localhost:3001",       # Alternative local port
-    "https://your-frontend-domain.vercel.app", # TODO: Replace with your actual deployed frontend URL (e.g., Vercel)
-    "https://rental-manager-backend-071n.onrender.com", # Backend URL (sometimes needed for internal calls)
+    "https://rental-manager-backend-071n.onrender.com", # Backend URL
+    # "https://your-actual-frontend-url.vercel.app", # <-- UNCOMMENT AND ADD YOUR DEPLOYED FRONTEND URL HERE
 ]
 
 app.add_middleware(
