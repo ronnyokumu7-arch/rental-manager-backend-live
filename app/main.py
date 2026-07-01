@@ -15,11 +15,10 @@ from app.routers import (
 )
 from app.scripts.seed_superadmin import update_password
 
-settings = get_settings()
-
-# 1. Modern Lifespan Manager
+# 1. Modern Lifespan Manager (replaces @app.on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Startup logic
     print("Running seed initialization...")
     try:
         update_password()
@@ -29,9 +28,21 @@ async def lifespan(app: FastAPI):
     
     start_scheduler()
     yield
+    
+    # Shutdown logic
     stop_scheduler()
 
-# 2. Initialize FastAPI App (SINGLE INITIALIZATION)
+settings = get_settings()
+
+# 2. CORS Configuration
+origins = [
+    "http://localhost:3000",       # Your local Next.js dev server
+    "http://localhost:3001",       # Just in case
+    "https://rental-manager-backend-071n.onrender.com",  # Your actual production backend URL
+    "https://your-frontend-domain.com", # Your actual production frontend URL (add this later)
+]
+
+# 3. Initialize FastAPI App (SINGLE INITIALIZATION)
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -39,14 +50,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 3. CORS Configuration
-origins = [
-    "http://localhost:3000",       # Local Next.js dev server
-    "http://localhost:3001",       # Alternative local port
-    "https://rental-manager-frontend.versel.app" #Change to your frontend URL
-    "https://rental-manager-backend-071n.onrender.com", # Backend URL
-]
-
+# 4. Add CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -55,17 +59,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 4. Mount the uploads directory for serving files
+# 5. Mount the uploads directory for serving files
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
-    
-if os.path.exists("./storage/contracts"):
-    app.mount("/contracts", StaticFiles(directory="./storage/contracts"), name="contracts")
 
-# 5. Global Exception Handler
+# 6. Global Exception Handler
 app.add_exception_handler(HTTPException, http_exception_handler)
 
-# 6. Health Check
+# 7. Health Check
 @app.get("/health", tags=["system"])
 def health_check():
     return {
@@ -73,12 +74,12 @@ def health_check():
         "environment": settings.environment,
     }
 
-# 7. Include all routers ONCE
+# 8. Include all routers ONCE
 routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports, quotations
+    admin, reports, quotations  # ✅ Quotations included here ONLY
 ]
 
 for router in routers:
