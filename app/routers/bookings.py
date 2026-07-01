@@ -38,16 +38,35 @@ def _get_booking_or_404(booking_id: int, tenant_id: int, db: Session) -> Booking
 # ---------------------------------------------------------------------------
 # LIST BOOKINGS
 # ---------------------------------------------------------------------------
+from fastapi import Query
+
+# ---------------------------------------------------------------------------
+# LIST BOOKINGS (Active)
+# ---------------------------------------------------------------------------
 @router.get("/", response_model=list[BookingOut])
 def list_bookings(
+    vehicle_id: int = Query(None, description="Filter bookings by vehicle ID"),
+    client_id: int = Query(None, description="Filter bookings by client ID"),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    return db.query(Booking).filter(
+    # Base query: Only active, non-archived bookings for this tenant
+    query = db.query(Booking).filter(
         Booking.tenant_id == current_user.tenant_id,
         Booking.is_archived == False,
-    ).order_by(Booking.created_at.desc()).all()
+    )
+    
+    # Apply filters if provided by the frontend
+    if vehicle_id is not None:
+        query = query.filter(Booking.vehicle_id == vehicle_id)
+    if client_id is not None:
+        query = query.filter(Booking.client_id == client_id)
+        
+    return query.order_by(Booking.created_at.desc()).all()
 
+# ---------------------------------------------------------------------------
+# LIST ARCHIVED BOOKINGS (Vault)
+# ---------------------------------------------------------------------------
 @router.get("/archived", response_model=list[BookingOut])
 def list_archived_bookings(
     db: Session = Depends(get_db),
