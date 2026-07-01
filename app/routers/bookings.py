@@ -51,7 +51,6 @@ def list_bookings(
         query = query.filter(Booking.vehicle_id == vehicle_id)
     if client_id is not None:
         query = query.filter(Booking.client_id == client_id)
-        
     return query.order_by(Booking.created_at.desc()).all()
 
 @router.get("/archived", response_model=list[BookingOut])
@@ -107,7 +106,7 @@ def create_booking(
     current_month = now.month
     current_year = now.year % 100
     prefix = f"BK-%{current_month:02d}{current_year:02d}"
-    
+
     last_booking = db.query(Booking.booking_number).filter(
         Booking.booking_number.like(f"{prefix}%")
     ).order_by(Booking.booking_number.desc()).first()
@@ -191,13 +190,12 @@ def confirm_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.pending:
         raise HTTPException(400, "Only pending bookings can be confirmed.")
-        
     booking.status = BookingStatus.confirmed
-    
+
     # Generate Contract & Finalize Invoice if they don't exist
     create_contract_for_booking(booking, db)
     create_invoice_for_booking(booking, db)
-    
+
     db.commit()
     db.refresh(booking)
 
@@ -222,7 +220,6 @@ def activate_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.confirmed:
         raise HTTPException(400, "Only confirmed bookings can be activated.")
-        
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     if client.status != ClientStatus.active:
         raise HTTPException(400, "Client must be active.")
@@ -255,7 +252,6 @@ def complete_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.active:
         raise HTTPException(400, "Only active bookings can be completed.")
-        
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
     booking.status = BookingStatus.completed
     if vehicle:
@@ -283,7 +279,6 @@ def cancel_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status in (BookingStatus.completed, BookingStatus.cancelled):
         raise HTTPException(400, f"Cannot cancel a {booking.status.value} booking")
-        
     if booking.status == BookingStatus.active:
         vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
         if vehicle:
@@ -332,7 +327,6 @@ def archive_booking(
         raise HTTPException(400, "Active bookings cannot be archived")
     if booking.is_archived:
         raise HTTPException(400, "Booking is already archived")
-        
     booking.is_archived = True
     booking.archived_at = datetime.now(timezone.utc)
     db.commit()
@@ -348,7 +342,6 @@ def restore_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if not booking.is_archived:
         raise HTTPException(400, "Booking is not archived")
-        
     booking.is_archived = False
     booking.archived_at = None
     db.commit()
