@@ -10,9 +10,9 @@ class BookingBase(BaseModel):
     vehicle_id: int
     start_date: datetime
     end_date: datetime
+    destination: Optional[str] = None
     pickup_location: Optional[str] = None
     return_location: Optional[str] = None
-    destination: Optional[str] = None
     daily_rate: Optional[Decimal] = None
     total_amount: Decimal = Field(gt=0)
     currency_code: str = Field(default="KES", min_length=3, max_length=3)
@@ -20,49 +20,40 @@ class BookingBase(BaseModel):
     @model_validator(mode="after")
     def check_dates(self):
         if self.end_date <= self.start_date:
-            raise ValueError('End date must be after start date')
+            raise ValueError("end_date must be after start_date")
         return self
 
 class BookingCreate(BookingBase):
     pass
 
 class BookingUpdate(BaseModel):
-    client_id: Optional[int] = None
-    vehicle_id: Optional[int] = None
+    destination: Optional[str] = None
     start_date: Optional[datetime] = None
     end_date: Optional[datetime] = None
     pickup_location: Optional[str] = None
     return_location: Optional[str] = None
-    destination: Optional[str] = None
     daily_rate: Optional[Decimal] = Field(default=None, gt=0)
     total_amount: Optional[Decimal] = Field(default=None, gt=0)
     currency_code: Optional[str] = Field(default=None, min_length=3, max_length=3)
     status: Optional[BookingStatus] = None
 
-    @model_validator(mode="after")
-    def check_dates(self):
-        if self.start_date and self.end_date and self.end_date <= self.start_date:
-            raise ValueError('End date must be after start date')
-        return self
-
-# ✅ FIXED: Aligned with database migration (DateTime, Decimal, and new columns)
 class BookingOut(BaseModel):
     id: int
     tenant_id: int
-    booking_number: Optional[str] = None # ✅ Added for UI
+    booking_number: Optional[str] = None # ✅ Added
     client_id: int
     vehicle_id: int
-    start_date: datetime
-    end_date: datetime
+    destination: Optional[str] = None
     pickup_location: Optional[str] = None
     return_location: Optional[str] = None
-    destination: Optional[str] = None
-    daily_rate: Optional[Decimal] = None
-    total_amount: Decimal
+    start_date: datetime                 # ✅ Fixed to datetime
+    end_date: datetime                   # ✅ Fixed to datetime
+    daily_rate: Optional[Decimal] = None # ✅ Added
+    total_amount: Decimal                # ✅ Fixed to Decimal
     currency_code: str
     status: BookingStatus
     is_archived: bool = False
-    quotation_id: Optional[int] = None
+    archived_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 
