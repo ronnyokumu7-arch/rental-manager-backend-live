@@ -15,7 +15,9 @@ from app.models.invoices import Invoice, InvoiceStatus
 from app.models.tenants import Tenant
 from app.models.users import User
 from app.models.vehicles import Vehicle
+from app.models.payments import Payment, PaymentStatus
 from app.schemas.invoice import InvoiceCreate, InvoiceOut, InvoiceUpdate
+from app.schemas.payment import PublicPaymentCreate
 from app.services.invoices import create_invoice_for_booking
 from app.services.pdf import generate_invoice_pdf
 
@@ -240,3 +242,57 @@ def download_invoice_pdf_public(token: str, db: Session = Depends(get_db)):
         media_type="application/pdf",
         headers={"Content-Disposition": f"attachment; filename=Invoice_{invoice.invoice_number}.pdf"},
     )
+    
+    
+    
+
+
+# ---------------------------------------------------------------------------
+# PUBLIC: RECORD OFFLINE PAYMENT (New - For Customer Portal)
+# ---------------------------------------------------------------------------
+@router.post("/public/{token}/pay", response_model=InvoiceOut)
+def pay_invoice_public(
+    token: str,
+    payload: PublicPaymentCreate,
+    db: Session = Depends(get_db),
+):
+    invoice = db.query(Invoice).filter(Invoice.share_token == token).first()
+    if not invoice:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    if invoice.share_token_expires_at and invoice.share_token_expires_at < datetime.now(timezone.utc):
+        raise HTTPException(status_code=410, detail="This invoice link has expired")
+    if invoice.status == InvoiceStatus.paid:
+        raise HTTPException(status_code=400, detail="Invoice is already fully paid")
+    if invoice.status == InvoiceStatus.void:
+        raise HTTPException(status_code=400, detail="Cannot pay a void invoice")
+
+    # Validate amount doesn't exceed remaining balance
+    remaining = invoice.amount_due - (invoice.amount_paid or 0)
+    if payload.amount > remaining:
+        raise HTTPException(status_code=400, detail=f"Payment amount exceeds remaining balance of {remaining}")
+
+    now = datetime.now(timezone.utc)
+    
+    # 1. Create Payment Record
+    db_payment = Payment(
+        invoice_id=invoice.id,
+        tenant_id=invoice.tenant_id,
+        amount=payload.amount,
+        currency_code=payload.currency_code,
+        method=payload.method,
+        reference=payload.reference,
+        status=PaymentStatus.completed,
+        paid_at=now,
+        notes=payload.notes,
+    )
+    db.add(db_payment)
+
+    # 2. Update Invoice Totals
+    invoice.amount_paid = (invoice.amount_paid or 0) + payload.amount
+    if invoice.amount_paid >= invoice.amount_due:
+        invoice.status = InvoiceStatus.paid
+        invoice.paid_at = now
+
+    db.commit()
+    db.refresh(invoice)
+    return invoice

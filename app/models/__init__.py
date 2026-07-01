@@ -11,7 +11,6 @@ from app.models.tenant_profile import TenantProfile
 from app.models.tenants import Tenant
 from app.models.users import User
 from app.models.vehicles import Vehicle
-from app.models.payments import Payment
 
 __all__ = [
     "Booking",
