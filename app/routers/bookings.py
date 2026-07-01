@@ -156,12 +156,13 @@ def generate_quotation(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
+    """Generate a quotation from an existing booking."""
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     
     if booking.status != BookingStatus.pending:
         raise HTTPException(status_code=400, detail="Can only generate quotation for pending bookings")
-
-    # Check if quotation already exists for this booking
+    
+    # Check if quotation already exists
     quotation = db.query(Quotation).filter(Quotation.booking_id == booking.id).first()
     
     if not quotation:
@@ -174,7 +175,6 @@ def generate_quotation(
             pickup_location=booking.pickup_location,
             return_location=booking.return_location,
             destination=booking.destination,
-            daily_rate=booking.daily_rate,
             total_amount=booking.total_amount,
             currency_code=booking.currency_code,
             booking_id=booking.id,
@@ -183,12 +183,12 @@ def generate_quotation(
         )
         db.add(quotation)
     else:
-        # Regenerate token if it was lost or expired
+        # Regenerate token if expired
         if not quotation.share_token or (quotation.share_token_expires_at and quotation.share_token_expires_at < datetime.now(timezone.utc)):
             quotation.share_token = str(uuid.uuid4())
             quotation.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
             quotation.status = QuotationStatus.pending
-
+    
     db.commit()
     db.refresh(quotation)
     
@@ -198,6 +198,11 @@ def generate_quotation(
         "token": quotation.share_token,
         "expires_at": quotation.share_token_expires_at
     }
+
+
+
+
+
 
 # ---------------------------------------------------------------------------
 # CONFIRM BOOKING
