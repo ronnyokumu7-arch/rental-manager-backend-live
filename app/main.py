@@ -58,6 +58,9 @@ app.add_middleware(
 # 4. Mount the uploads directory for serving files
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
+    
+if os.path.exists("./storage/contracts"):
+    app.mount("/contracts", StaticFiles(directory="./storage/contracts"), name="contracts")
 
 # 5. Global Exception Handler
 app.add_exception_handler(HTTPException, http_exception_handler)
