@@ -4,13 +4,14 @@ from app.models.contracts import Contract
 from app.models.invoices import Invoice
 from app.models.password_reset import PasswordResetToken
 from app.models.payments import Payment
-from app.models.quotations import Quotation  # ✅ ADD THIS
+from app.models.quotations import Quotation
 from app.models.subscriptions import Subscription
 from app.models.tenant_policies import TenantPolicy
 from app.models.tenant_profile import TenantProfile
 from app.models.tenants import Tenant
 from app.models.users import User
 from app.models.vehicles import Vehicle
+from app.models.payments import Payment
 
 __all__ = [
     "Booking",
@@ -19,7 +20,7 @@ __all__ = [
     "Invoice",
     "PasswordResetToken",
     "Payment",
-    "Quotation",  # ✅ ADD THIS
+    "Quotation",
     "Subscription",
     "TenantPolicy",
     "TenantProfile",
