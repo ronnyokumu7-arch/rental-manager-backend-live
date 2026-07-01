@@ -1,8 +1,8 @@
+# backend/app/routers/bookings.py
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -10,12 +10,10 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
 from app.models.bookings import Booking, BookingStatus
 from app.models.clients import Client, ClientStatus
-from app.models.quotations import Quotation, QuotationStatus
 from app.models.users import User
 from app.models.vehicles import Vehicle, VehicleStatus
 from app.schemas.booking import BookingCreate, BookingOut, BookingUpdate
 from app.services.contracts import create_contract_for_booking
-from app.services.email import send_quotation_to_client
 from app.services.invoices import create_invoice_for_booking
 from app.services.email import (
     send_booking_activated,
@@ -38,11 +36,6 @@ def _get_booking_or_404(booking_id: int, tenant_id: int, db: Session) -> Booking
 # ---------------------------------------------------------------------------
 # LIST BOOKINGS
 # ---------------------------------------------------------------------------
-from fastapi import Query
-
-# ---------------------------------------------------------------------------
-# LIST BOOKINGS (Active)
-# ---------------------------------------------------------------------------
 @router.get("/", response_model=list[BookingOut])
 def list_bookings(
     vehicle_id: int = Query(None, description="Filter bookings by vehicle ID"),
@@ -50,13 +43,10 @@ def list_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    # Base query: Only active, non-archived bookings for this tenant
     query = db.query(Booking).filter(
         Booking.tenant_id == current_user.tenant_id,
         Booking.is_archived == False,
     )
-    
-    # Apply filters if provided by the frontend
     if vehicle_id is not None:
         query = query.filter(Booking.vehicle_id == vehicle_id)
     if client_id is not None:
@@ -64,9 +54,6 @@ def list_bookings(
         
     return query.order_by(Booking.created_at.desc()).all()
 
-# ---------------------------------------------------------------------------
-# LIST ARCHIVED BOOKINGS (Vault)
-# ---------------------------------------------------------------------------
 @router.get("/archived", response_model=list[BookingOut])
 def list_archived_bookings(
     db: Session = Depends(get_db),
@@ -89,7 +76,7 @@ def get_booking(
     return _get_booking_or_404(booking_id, current_user.tenant_id, db)
 
 # ---------------------------------------------------------------------------
-# CREATE BOOKING (With Custom BK-Number Generation)
+# CREATE BOOKING
 # ---------------------------------------------------------------------------
 @router.post("/", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
 def create_booking(
@@ -112,30 +99,20 @@ def create_booking(
     ).first()
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found.")
-    
-    # ✅ Better error messages
-    if vehicle.is_archived:
-        raise HTTPException(status_code=409, detail="Vehicle has been archived and cannot be booked.")
-    if vehicle.status != VehicleStatus.available:
-        raise HTTPException(
-            status_code=409, 
-            detail=f"Vehicle is not available. Current status: {vehicle.status.value}"
-        )
+    if vehicle.status != VehicleStatus.available or vehicle.is_archived:
+        raise HTTPException(status_code=409, detail="Vehicle is not available.")
 
-
-    # ✅ GENERATE CUSTOM BOOKING NUMBER (e.g., BK-010626)
+    # Generate Custom Booking Number (e.g., BK-010726)
     now = datetime.now(timezone.utc)
     current_month = now.month
     current_year = now.year % 100
-    
-    # Find the last booking number for this specific month and year
     prefix = f"BK-%{current_month:02d}{current_year:02d}"
-    last_booking = db.query(Booking.booking_number).filter(
-        Booking.booking_number.like(prefix)
-    ).order_by(Booking.booking_number.desc()).first()
     
+    last_booking = db.query(Booking.booking_number).filter(
+        Booking.booking_number.like(f"{prefix}%")
+    ).order_by(Booking.booking_number.desc()).first()
+
     if last_booking and last_booking[0]:
-        # Extract counter from "BK-010626" -> "01" -> 1
         last_counter = int(last_booking[0].split("-")[1][:2])
         new_counter = last_counter + 1
     else:
@@ -143,14 +120,13 @@ def create_booking(
         
     new_booking_number = f"BK-{new_counter:02d}{current_month:02d}{current_year:02d}"
 
-    # Create the booking object
     db_booking = Booking(
         **booking.model_dump(),
         tenant_id=current_user.tenant_id,
         status=BookingStatus.pending,
-        booking_number=new_booking_number, # ✅ Assign the custom ID
+        booking_number=new_booking_number,
     )
-    
+
     db.add(db_booking)
     db.commit()
     db.refresh(db_booking)
@@ -175,64 +151,36 @@ def update_booking(
     return booking
 
 # ---------------------------------------------------------------------------
-# GENERATE QUOTATION FROM BOOKING
+# GENERATE DRAFT INVOICE (Acts as the v1 "Quotation")
 # ---------------------------------------------------------------------------
-@router.post("/{booking_id}/generate-quotation")
-def generate_quotation(
+@router.post("/{booking_id}/generate-invoice")
+def generate_invoice(
     booking_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """Generate a quotation from an existing booking."""
+    """Generate a draft invoice (acting as a quotation) to share with the client."""
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     
-    if booking.status != BookingStatus.pending:
-        raise HTTPException(status_code=400, detail="Can only generate quotation for pending bookings")
+    # 1. Create or fetch existing draft invoice
+    invoice = create_invoice_for_booking(booking, db)
     
-    # Check if quotation already exists
-    quotation = db.query(Quotation).filter(Quotation.booking_id == booking.id).first()
-    
-    if not quotation:
-        quotation = Quotation(
-            tenant_id=booking.tenant_id,
-            client_id=booking.client_id,
-            vehicle_id=booking.vehicle_id,
-            start_date=booking.start_date,
-            end_date=booking.end_date,
-            pickup_location=booking.pickup_location,
-            return_location=booking.return_location,
-            destination=booking.destination,
-            total_amount=booking.total_amount,
-            currency_code=booking.currency_code,
-            booking_id=booking.id,
-            share_token=str(uuid.uuid4()),
-            share_token_expires_at=datetime.now(timezone.utc) + timedelta(days=7)
-        )
-        db.add(quotation)
-    else:
-        # Regenerate token if expired
-        if not quotation.share_token or (quotation.share_token_expires_at and quotation.share_token_expires_at < datetime.now(timezone.utc)):
-            quotation.share_token = str(uuid.uuid4())
-            quotation.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-            quotation.status = QuotationStatus.pending
-    
-    db.commit()
-    db.refresh(quotation)
-    
+    # 2. Ensure share token exists and is valid
+    if not invoice.share_token or (invoice.share_token_expires_at and invoice.share_token_expires_at < datetime.now(timezone.utc)):
+        invoice.share_token = str(uuid.uuid4())
+        invoice.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        db.commit()
+        db.refresh(invoice)
+
     base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     return {
-        "share_url": f"{base_url}/quote/{quotation.share_token}",
-        "token": quotation.share_token,
-        "expires_at": quotation.share_token_expires_at
+        "share_url": f"{base_url}/invoice/{invoice.share_token}",
+        "token": invoice.share_token,
+        "expires_at": invoice.share_token_expires_at
     }
 
-
-
-
-
-
 # ---------------------------------------------------------------------------
-# CONFIRM BOOKING
+# LIFECYCLE TRANSITIONS
 # ---------------------------------------------------------------------------
 @router.post("/{booking_id}/confirm", response_model=BookingOut)
 def confirm_booking(
@@ -243,13 +191,16 @@ def confirm_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.pending:
         raise HTTPException(400, "Only pending bookings can be confirmed.")
-    
+        
     booking.status = BookingStatus.confirmed
+    
+    # Generate Contract & Finalize Invoice if they don't exist
     create_contract_for_booking(booking, db)
     create_invoice_for_booking(booking, db)
+    
     db.commit()
     db.refresh(booking)
-    
+
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
     if client and client.email:
@@ -262,9 +213,6 @@ def confirm_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# ACTIVATE BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/activate", response_model=BookingOut)
 def activate_booking(
     booking_id: int,
@@ -274,20 +222,20 @@ def activate_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.confirmed:
         raise HTTPException(400, "Only confirmed bookings can be activated.")
-    
+        
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     if client.status != ClientStatus.active:
         raise HTTPException(400, "Client must be active.")
-    
+
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
     if vehicle.status != VehicleStatus.available:
         raise HTTPException(400, "Vehicle is not available.")
-    
+
     booking.status = BookingStatus.active
     vehicle.status = VehicleStatus.rented
     db.commit()
     db.refresh(booking)
-    
+
     if client.email:
         send_booking_activated(
             to=client.email,
@@ -298,9 +246,6 @@ def activate_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# COMPLETE BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/complete", response_model=BookingOut)
 def complete_booking(
     booking_id: int,
@@ -310,13 +255,15 @@ def complete_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.active:
         raise HTTPException(400, "Only active bookings can be completed.")
-    
+        
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
     booking.status = BookingStatus.completed
-    vehicle.status = VehicleStatus.available
+    if vehicle:
+        vehicle.status = VehicleStatus.available
+        
     db.commit()
     db.refresh(booking)
-    
+
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     if client and client.email:
         send_booking_completed(
@@ -327,9 +274,6 @@ def complete_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# CANCEL BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/cancel", response_model=BookingOut)
 def cancel_booking(
     booking_id: int,
@@ -339,16 +283,16 @@ def cancel_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status in (BookingStatus.completed, BookingStatus.cancelled):
         raise HTTPException(400, f"Cannot cancel a {booking.status.value} booking")
-    
+        
     if booking.status == BookingStatus.active:
         vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
         if vehicle:
             vehicle.status = VehicleStatus.available
-    
+
     booking.status = BookingStatus.cancelled
     db.commit()
     db.refresh(booking)
-    
+
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
     if client and client.email:
@@ -360,9 +304,6 @@ def cancel_booking(
         )
     return booking
 
-# ---------------------------------------------------------------------------
-# NO-SHOW BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/no-show", response_model=BookingOut)
 def no_show_booking(
     booking_id: int,
@@ -372,14 +313,13 @@ def no_show_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.confirmed:
         raise HTTPException(400, "Only confirmed bookings can be marked as no-show.")
-    
     booking.status = BookingStatus.no_show
     db.commit()
     db.refresh(booking)
     return booking
 
 # ---------------------------------------------------------------------------
-# ARCHIVE BOOKING
+# ARCHIVE & RESTORE
 # ---------------------------------------------------------------------------
 @router.post("/{booking_id}/archive", response_model=BookingOut)
 def archive_booking(
@@ -392,16 +332,13 @@ def archive_booking(
         raise HTTPException(400, "Active bookings cannot be archived")
     if booking.is_archived:
         raise HTTPException(400, "Booking is already archived")
-    
+        
     booking.is_archived = True
     booking.archived_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(booking)
     return booking
 
-# ---------------------------------------------------------------------------
-# RESTORE BOOKING
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/restore", response_model=BookingOut)
 def restore_booking(
     booking_id: int,
@@ -411,7 +348,7 @@ def restore_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if not booking.is_archived:
         raise HTTPException(400, "Booking is not archived")
-    
+        
     booking.is_archived = False
     booking.archived_at = None
     db.commit()
@@ -419,7 +356,7 @@ def restore_booking(
     return booking
 
 # ---------------------------------------------------------------------------
-# DELETE BOOKING
+# DELETE
 # ---------------------------------------------------------------------------
 @router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_booking(
@@ -432,52 +369,3 @@ def delete_booking(
         raise HTTPException(400, "Active bookings cannot be deleted.")
     db.delete(booking)
     db.commit()
-    
-    
-    
-    
-
-@router.post("/{booking_id}/send-quotation")
-def send_quotation(
-    booking_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
-):
-    """Generate link if missing and email the quotation to the client."""
-    booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
-    
-    # 1. Find or Create Quotation
-    quotation = db.query(Quotation).filter(Quotation.booking_id == booking.id).first()
-    if not quotation:
-        raise HTTPException(status_code=404, detail="No quotation found for this booking. Please generate one first.")
-        
-    # 2. Ensure Share Token Exists
-    if not quotation.share_token:
-        quotation.share_token = str(uuid.uuid4())
-        quotation.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
-        db.commit()
-
-    # 3. Get Client Email
-    client = db.query(Client).filter(Client.id == booking.client_id).first()
-    if not client or not client.email:
-        raise HTTPException(status_code=400, detail="Client does not have an email address on file.")
-
-    # 4. Send Email
-    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
-    share_url = f"{base_url}/quote/{quotation.share_token}"
-    
-    send_quotation_to_client(
-        to=client.email,
-        client_name=client.full_name,
-        quotation_id=quotation.id,
-        quotation_url=share_url,
-        total_amount=str(quotation.total_amount),
-        currency=quotation.currency_code,
-        expires_at=quotation.share_token_expires_at.strftime("%Y-%m-%d") if quotation.share_token_expires_at else "N/A"
-    )
-    
-    # 5. Update Status to Sent (Optional, if you have a 'sent' status)
-    # quotation.status = QuotationStatus.sent 
-    # db.commit()
-
-    return {"message": "Quotation sent successfully"}

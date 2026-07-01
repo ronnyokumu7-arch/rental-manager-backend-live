@@ -1,3 +1,4 @@
+# backend/main.py
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -9,16 +10,15 @@ from app.core.exceptions import http_exception_handler
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.routers import (
     admin, auth, bookings, clients, contracts,
-    invoices, payments, quotations, reports, subscriptions,
+    invoices, payments, reports, subscriptions,
     tenant_policies, tenant_profile, tenants,
     users, vehicles,
 )
 from app.scripts.seed_superadmin import update_password
 
-# 1. Modern Lifespan Manager (replaces @app.on_event)
+# 1. Modern Lifespan Manager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic
     print("Running seed initialization...")
     try:
         update_password()
@@ -28,21 +28,20 @@ async def lifespan(app: FastAPI):
     
     start_scheduler()
     yield
-    
-    # Shutdown logic
     stop_scheduler()
 
 settings = get_settings()
 
 # 2. CORS Configuration
 origins = [
-    "http://localhost:3000",       # Your local Next.js dev server
-    "http://localhost:3001",       # Just in case
-    "https://rental-manager-backend-071n.onrender.com",  # Your actual production backend URL
-    "https://your-frontend-domain.com", # Your actual production frontend URL (add this later)
+    "http://localhost:3000",
+    "http://localhost:3001",
+    "https://rental-manager-frontend.vercel.app", # Update to your actual frontend URL
+    "https://rental-manager-backend-071n.onrender.com",
+    "*", # Kept for safety during transition
 ]
 
-# 3. Initialize FastAPI App (SINGLE INITIALIZATION)
+# 3. Initialize FastAPI App
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -59,9 +58,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 5. Mount the uploads directory for serving files
+# 5. Mount directories
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
+if os.path.exists("./storage/contracts"):
+    app.mount("/contracts", StaticFiles(directory="./storage/contracts"), name="contracts")
 
 # 6. Global Exception Handler
 app.add_exception_handler(HTTPException, http_exception_handler)
@@ -74,12 +75,12 @@ def health_check():
         "environment": settings.environment,
     }
 
-# 8. Include all routers ONCE
+# 8. Include all routers
 routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports, quotations  # ✅ Quotations included here ONLY
+    admin, reports
 ]
 
 for router in routers:

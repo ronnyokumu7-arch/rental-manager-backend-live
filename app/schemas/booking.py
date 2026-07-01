@@ -1,4 +1,4 @@
-# backend/app/schemas/booking.py
+# app/schemas/booking.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
@@ -40,16 +40,16 @@ class BookingUpdate(BaseModel):
 class BookingOut(BaseModel):
     id: int
     tenant_id: int
-    booking_number: Optional[str] = None # ✅ Added
+    booking_number: Optional[str] = None
     client_id: int
     vehicle_id: int
     destination: Optional[str] = None
     pickup_location: Optional[str] = None
     return_location: Optional[str] = None
-    start_date: datetime                 # ✅ Fixed to datetime
-    end_date: datetime                   # ✅ Fixed to datetime
-    daily_rate: Optional[Decimal] = None # ✅ Added
-    total_amount: Decimal                # ✅ Fixed to Decimal
+    start_date: datetime
+    end_date: datetime
+    daily_rate: Optional[Decimal] = None
+    total_amount: Decimal
     currency_code: str
     status: BookingStatus
     is_archived: bool = False
