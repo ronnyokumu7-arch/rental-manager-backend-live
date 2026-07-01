@@ -1,3 +1,4 @@
+# backend/app/routers/quotations.py
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -77,10 +78,11 @@ def generate_share_link(
         quotation.share_token = str(uuid.uuid4())
         quotation.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
         db.commit()
-    
+
     base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     return {
         "share_url": f"{base_url}/quote/{quotation.share_token}",
+        "share_token": quotation.share_token,
         "expires_at": quotation.share_token_expires_at,
     }
 
@@ -89,14 +91,13 @@ def view_public_quotation(token: str, db: Session = Depends(get_db)):
     quotation = db.query(Quotation).filter(Quotation.share_token == token).first()
     if not quotation:
         raise HTTPException(status_code=404, detail="Quotation not found")
-    
     if quotation.share_token_expires_at and quotation.share_token_expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="This quotation has expired")
-    
+
     client = db.query(Client).filter(Client.id == quotation.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == quotation.vehicle_id).first()
     tenant = db.query(Tenant).filter(Tenant.id == quotation.tenant_id).first()
-    
+
     return QuotationPublicView(
         id=quotation.id,
         tenant_name=tenant.name if tenant else "Unknown Agency",
@@ -120,7 +121,6 @@ def accept_quotation(token: str, db: Session = Depends(get_db)):
     quotation = db.query(Quotation).filter(Quotation.share_token == token).first()
     if not quotation:
         raise HTTPException(status_code=404, detail="Quotation not found")
-    
     if quotation.status != QuotationStatus.pending:
         raise HTTPException(status_code=400, detail="Quotation already processed")
         
@@ -133,7 +133,8 @@ def accept_quotation(token: str, db: Session = Depends(get_db)):
     
     if quotation.booking_id:
         booking = db.query(Booking).filter(Booking.id == quotation.booking_id).first()
-        if booking:
+        # ✅ Safety check: Only confirm if booking is still pending
+        if booking and booking.status == BookingStatus.pending:
             booking.status = BookingStatus.confirmed
             create_contract_for_booking(booking, db)
             create_invoice_for_booking(booking, db)
@@ -146,7 +147,6 @@ def decline_quotation(token: str, db: Session = Depends(get_db)):
     quotation = db.query(Quotation).filter(Quotation.share_token == token).first()
     if not quotation:
         raise HTTPException(status_code=404, detail="Quotation not found")
-    
     if quotation.status != QuotationStatus.pending:
         raise HTTPException(status_code=400, detail="Quotation already processed")
 
@@ -154,7 +154,8 @@ def decline_quotation(token: str, db: Session = Depends(get_db)):
     
     if quotation.booking_id:
         booking = db.query(Booking).filter(Booking.id == quotation.booking_id).first()
-        if booking:
+        # ✅ Safety check: Only cancel if booking is still pending
+        if booking and booking.status == BookingStatus.pending:
             booking.status = BookingStatus.cancelled
 
     db.commit()

@@ -1,4 +1,3 @@
-# backend/app/routers/bookings.py
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -16,6 +15,7 @@ from app.models.users import User
 from app.models.vehicles import Vehicle, VehicleStatus
 from app.schemas.booking import BookingCreate, BookingOut, BookingUpdate
 from app.services.contracts import create_contract_for_booking
+from app.services.email import send_quotation_to_client
 from app.services.invoices import create_invoice_for_booking
 from app.services.email import (
     send_booking_activated,
@@ -93,8 +93,16 @@ def create_booking(
     ).first()
     if not vehicle:
         raise HTTPException(status_code=404, detail="Vehicle not found.")
-    if vehicle.status != VehicleStatus.available or vehicle.is_archived:
-        raise HTTPException(status_code=409, detail="Vehicle is not available.")
+    
+    # ✅ Better error messages
+    if vehicle.is_archived:
+        raise HTTPException(status_code=409, detail="Vehicle has been archived and cannot be booked.")
+    if vehicle.status != VehicleStatus.available:
+        raise HTTPException(
+            status_code=409, 
+            detail=f"Vehicle is not available. Current status: {vehicle.status.value}"
+        )
+
 
     # ✅ GENERATE CUSTOM BOOKING NUMBER (e.g., BK-010626)
     now = datetime.now(timezone.utc)
@@ -405,3 +413,52 @@ def delete_booking(
         raise HTTPException(400, "Active bookings cannot be deleted.")
     db.delete(booking)
     db.commit()
+    
+    
+    
+    
+
+@router.post("/{booking_id}/send-quotation")
+def send_quotation(
+    booking_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_subscription),
+):
+    """Generate link if missing and email the quotation to the client."""
+    booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
+    
+    # 1. Find or Create Quotation
+    quotation = db.query(Quotation).filter(Quotation.booking_id == booking.id).first()
+    if not quotation:
+        raise HTTPException(status_code=404, detail="No quotation found for this booking. Please generate one first.")
+        
+    # 2. Ensure Share Token Exists
+    if not quotation.share_token:
+        quotation.share_token = str(uuid.uuid4())
+        quotation.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+        db.commit()
+
+    # 3. Get Client Email
+    client = db.query(Client).filter(Client.id == booking.client_id).first()
+    if not client or not client.email:
+        raise HTTPException(status_code=400, detail="Client does not have an email address on file.")
+
+    # 4. Send Email
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
+    share_url = f"{base_url}/quote/{quotation.share_token}"
+    
+    send_quotation_to_client(
+        to=client.email,
+        client_name=client.full_name,
+        quotation_id=quotation.id,
+        quotation_url=share_url,
+        total_amount=str(quotation.total_amount),
+        currency=quotation.currency_code,
+        expires_at=quotation.share_token_expires_at.strftime("%Y-%m-%d") if quotation.share_token_expires_at else "N/A"
+    )
+    
+    # 5. Update Status to Sent (Optional, if you have a 'sent' status)
+    # quotation.status = QuotationStatus.sent 
+    # db.commit()
+
+    return {"message": "Quotation sent successfully"}

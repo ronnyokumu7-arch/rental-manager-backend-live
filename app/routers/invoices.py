@@ -1,10 +1,9 @@
+# backend/app/routers/invoices.py
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Optional
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
@@ -65,7 +64,6 @@ def create_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    from app.models.bookings import Booking
     booking = db.query(Booking).filter(
         Booking.id == payload.booking_id,
         Booking.tenant_id == current_user.tenant_id
@@ -73,10 +71,16 @@ def create_invoice(
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found or access denied")
     
+    # Create the invoice using the service
+    invoice = create_invoice_for_booking(booking, db)
+    
+    # If manual notes were provided, update the invoice
     if payload.notes:
-        booking._override_notes = payload.notes 
-
-    return create_invoice_for_booking(booking, db)
+        invoice.notes = payload.notes
+        db.commit()
+        db.refresh(invoice)
+        
+    return invoice
 
 # ---------------------------------------------------------------------------
 # UPDATE INVOICE
@@ -122,7 +126,7 @@ def void_invoice(
         raise HTTPException(status_code=400, detail="Invoice is already void")
     if invoice.status == InvoiceStatus.paid:
         raise HTTPException(status_code=400, detail="Cannot void a paid invoice")
-
+        
     invoice.status = InvoiceStatus.void
     db.commit()
     db.refresh(invoice)
@@ -144,7 +148,6 @@ def download_invoice_pdf(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
         
-    # Generate on the fly to ensure it's always up to date
     pdf_bytes = generate_invoice_pdf(invoice, db)
     return Response(
         content=pdf_bytes,
@@ -153,7 +156,7 @@ def download_invoice_pdf(
     )
 
 # ---------------------------------------------------------------------------
-# GENERATE SHARE LINK (New - For Customer Portal)
+# GENERATE SHARE LINK (For Customer Portal)
 # ---------------------------------------------------------------------------
 @router.post("/{invoice_id}/share-link", response_model=dict)
 def generate_invoice_share_link(
@@ -167,13 +170,13 @@ def generate_invoice_share_link(
     ).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-
+        
     share_token = str(uuid.uuid4())
     expires_at = datetime.now(timezone.utc) + timedelta(days=30)
 
     invoice.share_token = share_token
     invoice.share_token_expires_at = expires_at
-    
+
     db.commit()
     db.refresh(invoice)
 
@@ -185,14 +188,13 @@ def generate_invoice_share_link(
     }
 
 # ---------------------------------------------------------------------------
-# PUBLIC: VIEW INVOICE (New - For Customer Portal)
+# PUBLIC: VIEW INVOICE (No Auth Required)
 # ---------------------------------------------------------------------------
 @router.get("/public/{token}")
 def view_invoice_public(token: str, db: Session = Depends(get_db)):
     invoice = db.query(Invoice).filter(Invoice.share_token == token).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-        
     if invoice.share_token_expires_at and invoice.share_token_expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="This invoice link has expired")
 
@@ -222,18 +224,16 @@ def view_invoice_public(token: str, db: Session = Depends(get_db)):
     }
 
 # ---------------------------------------------------------------------------
-# PUBLIC: DOWNLOAD PDF (New - For Customer Portal)
+# PUBLIC: DOWNLOAD PDF (No Auth Required)
 # ---------------------------------------------------------------------------
 @router.get("/public/{token}/pdf")
 def download_invoice_pdf_public(token: str, db: Session = Depends(get_db)):
     invoice = db.query(Invoice).filter(Invoice.share_token == token).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-        
     if invoice.share_token_expires_at and invoice.share_token_expires_at < datetime.now(timezone.utc):
         raise HTTPException(status_code=410, detail="This invoice link has expired")
 
-    # Generate PDF on the fly
     pdf_bytes = generate_invoice_pdf(invoice, db)
     return Response(
         content=pdf_bytes,

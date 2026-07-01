@@ -1,7 +1,5 @@
-# app/services/invoices.py
-from datetime import datetime
+# backend/app/services/invoices.py
 from sqlalchemy.orm import Session
-
 from app.models.bookings import Booking
 from app.models.invoices import Invoice, InvoiceStatus
 
@@ -35,7 +33,7 @@ def create_invoice_for_booking(booking: Booking, db: Session) -> Invoice:
     """
     Creates a draft invoice for a confirmed booking.
     """
-    # 1. Idempotency Check
+    # 1. Idempotency Check (Prevent duplicate invoices)
     existing_invoice = db.query(Invoice).filter(Invoice.booking_id == booking.id).first()
     if existing_invoice:
         return existing_invoice
@@ -47,17 +45,17 @@ def create_invoice_for_booking(booking: Booking, db: Session) -> Invoice:
     db_invoice = Invoice(
         tenant_id=booking.tenant_id,
         booking_id=booking.id,
-        invoice_number=invoice_number, # ✅ Using the new format
-        status=InvoiceStatus.draft,
+        invoice_number=invoice_number,
+        status=InvoiceStatus.draft, # Always starts as draft
         amount_due=booking.total_amount,
         amount_paid=0,
         currency_code=booking.currency_code or "KES",
         due_date=booking.end_date,
         notes=f"Auto-generated invoice for Booking #{booking.id}",
     )
-    
+
     db.add(db_invoice)
     db.commit()
     db.refresh(db_invoice)
-    
+
     return db_invoice

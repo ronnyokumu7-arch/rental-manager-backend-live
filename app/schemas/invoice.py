@@ -1,7 +1,8 @@
+# backend/app/schemas/invoice.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.models.invoices import InvoiceStatus
 
 class InvoiceCreate(BaseModel):
@@ -26,6 +27,8 @@ class InvoiceOut(BaseModel):
     paid_at: Optional[datetime] = None
     pdf_path: Optional[str] = None
     notes: Optional[str] = None
+    share_token: Optional[str] = None
+    share_token_expires_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
 

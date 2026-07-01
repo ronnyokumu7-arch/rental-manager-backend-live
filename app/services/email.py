@@ -388,8 +388,7 @@ def send_contract_to_client(
         _base_template("Contract Ready for Signature", body)
     )
     
-    
-    # Add this to the bottom of app/services/email.py
+
 
 def send_invoice_to_client(
     to: str,
@@ -421,4 +420,42 @@ Please review the details and arrange payment at your earliest convenience.
         to, 
         f"Invoice {invoice_number} — Payment Due", 
         _base_template("Invoice Issued", body)
+    )
+    
+    
+
+
+def send_quotation_to_client(
+    to: str,
+    client_name: str,
+    quotation_id: int,
+    quotation_url: str,
+    total_amount: str,
+    currency: str,
+    expires_at: str,
+):
+    """Send quotation link to client for review and signature."""
+    body = f"""
+    
+Dear {client_name},
+We have prepared a rental quotation for your review.
+| Quotation ID
+|#{quotation_id}
+|
+| ---|---|
+| Total Amount
+|{currency} {total_amount}
+|
+| Valid Until
+|{expires_at}
+|
+Please review the details and accept the quotation by clicking the button below:
+[Review Quotation]({quotation_url})
+        This link will expire on the date specified above. If you have any questions, please contact us.
+    
+    """
+    return _send(
+        to, 
+        f"Your Rental Quotation #{quotation_id}", 
+        _base_template("Quotation Ready for Review", body)
     )
