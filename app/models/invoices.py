@@ -47,4 +47,4 @@ class Invoice(Base):
     # Relationships
     booking = relationship("Booking", back_populates="invoices")
     tenant = relationship("Tenant", back_populates="invoices")
-    # payments = relationship("Payment", back_populates="invoice") # Uncomment when Payment model is ready
+    payments = relationship("Payment", back_populates="invoice")
