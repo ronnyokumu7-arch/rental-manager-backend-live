@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     tenant_admin_password: str
     frontend_url: str = "http://localhost:3000"
     uploads_dir: str = "./uploads"
-    public_url_base: str = "https://localhost:8000"
+    public_url_base: str = "https://rental-manager-backend-live.onrender.com"
 
     model_config = {
         "env_file": ".env",
