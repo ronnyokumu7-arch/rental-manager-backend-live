@@ -37,8 +37,6 @@ origins = [
     "http://localhost:3000",
     "http://localhost:3002",
     "https://rental-manager-frontend.vercel.app", # Update to your actual frontend URL
-    "https://rental-manager-backend-live.onrender.com",
-    "*", # Kept for safety during transition
 ]
 
 # 3. Initialize FastAPI App
