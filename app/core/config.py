@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     api_v1_prefix: str = "/api/v1"
     
     SECRET_KEY: str
-    access_token_expire_minutes: int = 10080
+    access_token_expire_minutes: int = 60
     database_url: str
-    cors_origins: List[str] = ["http://localhost:3000","http://localhost:3001"]
+    cors_origins: List[str] = ["http://localhost:3000","http://localhost:5173","http://localhost:3002"]
     resend_api_key: str = ""
     from_email: str = "onboarding@resend.dev"
     from_name: str = "Rental Manager"
