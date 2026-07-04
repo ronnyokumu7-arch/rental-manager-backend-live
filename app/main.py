@@ -35,9 +35,9 @@ settings = get_settings()
 # 2. CORS Configuration
 origins = [
     "http://localhost:3000",
-    "http://localhost:3001",
+    "http://localhost:3002",
     "https://rental-manager-frontend.vercel.app", # Update to your actual frontend URL
-    "https://rental-manager-backend-071n.onrender.com",
+    "https://rental-manager-backend-live.onrender.com",
     "*", # Kept for safety during transition
 ]
 
