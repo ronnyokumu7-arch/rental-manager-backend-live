@@ -1,10 +1,8 @@
-# backend/main.py
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import os
-
 from app.core.config import get_settings
 from app.core.exceptions import http_exception_handler
 from app.jobs.scheduler import start_scheduler, stop_scheduler
@@ -32,14 +30,7 @@ async def lifespan(app: FastAPI):
 
 settings = get_settings()
 
-# 2. CORS Configuration
-origins = [
-    "http://localhost:3000",
-    "http://localhost:3002",
-    "https://rental-manager-frontend.vercel.app", # Update to your actual frontend URL
-]
-
-# 3. Initialize FastAPI App
+# 2. Initialize FastAPI App
 app = FastAPI(
     title=settings.app_name,
     version="1.0.0",
@@ -47,11 +38,32 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# 3. CORS Configuration - Read from environment variables
+# Parse CORS_ORIGINS from environment variable (JSON string) or use default
+import json
+cors_origins_env = os.getenv("CORS_ORIGINS")
+if cors_origins_env:
+    try:
+        origins = json.loads(cors_origins_env)
+    except:
+        # Fallback to default if parsing fails
+        origins = [
+            "http://localhost:3000",
+            "http://localhost:3002",
+            "http://localhost:5173",
+            "https://rental-manager-frontend.vercel.app",
+        ]
+else:
+    # Use default origins from settings
+    origins = settings.cors_origins
+
+print(f"🌍 CORS Origins configured: {origins}")
+
 # 4. Add CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,
+    allow_credentials=True,  # CRITICAL: Must be True for cookies/auth
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -59,6 +71,7 @@ app.add_middleware(
 # 5. Mount directories
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
+
 if os.path.exists("./storage/contracts"):
     app.mount("/contracts", StaticFiles(directory="./storage/contracts"), name="contracts")
 
@@ -83,3 +96,12 @@ routers = [
 
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
+
+# Root endpoint
+@app.get("/")
+def root():
+    return {
+        "message": "Rental Manager API is running",
+        "docs": "/docs",
+        "health": "/health"
+    }
