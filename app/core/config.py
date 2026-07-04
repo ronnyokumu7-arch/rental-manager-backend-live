@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     SECRET_KEY: str
     access_token_expire_minutes: int = 10080
     database_url: str
-    cors_origins: List[str] = ["http://localhost:3000", "http://localhost:5173", "http://localhost:3002"]
+    cors_origins: List[str] = ["http://localhost:3000","http://localhost:3001"]
     resend_api_key: str = ""
     from_email: str = "onboarding@resend.dev"
     from_name: str = "Rental Manager"
@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     tenant_admin_password: str
     frontend_url: str = "http://localhost:3000"
     uploads_dir: str = "./uploads"
-    public_url_base: str = "https://rental-manager-backend-071n.onrender.com/uploads"
+    public_url_base: str = "https://localhost:8000"
 
     model_config = {
         "env_file": ".env",
