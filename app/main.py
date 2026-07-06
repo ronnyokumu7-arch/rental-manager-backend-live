@@ -10,7 +10,7 @@ from app.routers import (
     admin, auth, bookings, clients, contracts,
     invoices, payments, reports, subscriptions,
     tenant_policies, tenant_profile, tenants,
-    users, vehicles, activity_logs,
+    users, vehicles, activity_logs, role_templates,
 )
 from app.scripts.seed_superadmin import update_password
 
@@ -85,7 +85,7 @@ def health_check():
 routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
-    tenant_profile, tenant_policies, contracts,
+    tenant_profile, tenant_policies, role_templates, contracts,
     admin, reports, activity_logs
 ]
 

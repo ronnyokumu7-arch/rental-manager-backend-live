@@ -10,6 +10,9 @@ from app.models.users import User, UserRole
 from app.schemas.user import UserCreate, UserOut, UserUpdate
 from app.services.email import send_welcome_email, send_password_changed
 
+from app.models.role_template import RoleTemplate
+from app.core.permissions import ALL_PERMISSION_KEYS
+
 router = APIRouter(prefix="/users", tags=["users"])
 
 # The Bouncers: Only super_admin and tenant_admin can perform these actions
@@ -65,27 +68,57 @@ def _enforce_staff_permission(current_user: User, target_user: User, action: str
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+
 @router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(
     user: UserCreate,
     db: Session = Depends(get_db),
     current_user: User = admin_or_above, # ✅ Only admins can create
 ):
+    # 1. Prepare data and normalize email
     user_data = user.model_dump(exclude={"password"})
     user_data["email"] = normalize_email(user_data["email"])
     
+    # 2. Auto-assign tenant_id for tenant users if not explicitly provided
     if user.role != UserRole.super_admin and not user_data.get("tenant_id"):
         user_data["tenant_id"] = current_user.tenant_id
 
+    # 3. Run validation checks
     _enforce_create_permission(current_user, user.role, user_data.get("tenant_id"))
     _validate_tenant_for_role(db, user.role, user_data.get("tenant_id"))
 
+    # 4. Ensure super_admins have no tenant_id
     if user.role == UserRole.super_admin:
         user_data["tenant_id"] = None
 
+    # 5. Create the user instance
     db_user = User(**user_data, password_hash=get_password_hash(user.password))
-    db.add(db_user)
     
+    # ✅ 6. AUTO-ASSIGN PERMISSIONS BASED ON ROLE TEMPLATE
+    if user_data.get("job_title"):
+        # Look for a custom template defined in the Settings page
+        template = db.query(RoleTemplate).filter(
+            RoleTemplate.tenant_id == user_data["tenant_id"],
+            RoleTemplate.job_title == user_data["job_title"]
+        ).first()
+        
+        if template:
+            db_user.permissions = template.permissions
+        elif user.role == UserRole.tenant_admin:
+            # Fallback for Admins without a template: Grant ALL permissions
+            db_user.permissions = ALL_PERMISSION_KEYS
+        else:
+            # Fallback for Staff without a template: Basic view permissions
+            db_user.permissions = ["view_dashboard", "view_bookings", "view_clients"]
+    elif user.role == UserRole.tenant_admin:
+        # Admins without a job_title still get full access
+        db_user.permissions = ALL_PERMISSION_KEYS
+    else:
+        # Staff without a job_title get basic access
+        db_user.permissions = ["view_dashboard", "view_bookings", "view_clients"]
+
+    # 7. Save to database
+    db.add(db_user)
     try:
         db.commit()
     except IntegrityError:
@@ -94,6 +127,7 @@ def create_user(
         
     db.refresh(db_user)
     
+    # 8. Send welcome email
     send_welcome_email(
         to=db_user.email,
         full_name=db_user.full_name,

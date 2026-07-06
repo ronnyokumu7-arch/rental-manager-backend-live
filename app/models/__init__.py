@@ -10,7 +10,8 @@ from app.models.tenant_profile import TenantProfile
 from app.models.tenants import Tenant
 from app.models.users import User
 from app.models.vehicles import Vehicle
-from app.models.activity_log import ActivityLog  # ✅ NEW
+from app.models.activity_log import ActivityLog
+from app.models.role_template import RoleTemplate
 
 __all__ = [
     "Booking",
@@ -25,5 +26,6 @@ __all__ = [
     "Tenant",
     "User",
     "Vehicle",
-    "ActivityLog",  # ✅ NEW
+    "ActivityLog",
+    "RoleTemplate", # ✅ NEW
 ]
