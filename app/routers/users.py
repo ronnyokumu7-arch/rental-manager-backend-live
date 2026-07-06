@@ -117,16 +117,27 @@ def create_user(
     db: Session = Depends(get_db),
     current_user: User = admin_or_above,
 ):
-    _enforce_create_permission(current_user, user.role, user.tenant_id)
-    _validate_tenant_for_role(db, user.role, user.tenant_id)
-
+    # 1. Prepare data and normalize email
     user_data = user.model_dump(exclude={"password"})
     user_data["email"] = normalize_email(user_data["email"])
+    
+    # ✅ FIX: Auto-assign tenant_id for tenant users if not explicitly provided by the frontend.
+    # This prevents the "tenant_id is required" 400 error.
+    if user.role != UserRole.super_admin and not user_data.get("tenant_id"):
+        user_data["tenant_id"] = current_user.tenant_id
+
+    # 2. Run validation checks (tenant_id is now guaranteed to be present for tenant roles)
+    _enforce_create_permission(current_user, user.role, user_data.get("tenant_id"))
+    _validate_tenant_for_role(db, user.role, user_data.get("tenant_id"))
+
+    # 3. Ensure super_admins have no tenant_id
     if user.role == UserRole.super_admin:
         user_data["tenant_id"] = None
 
+    # 4. Create and save the user
     db_user = User(**user_data, password_hash=get_password_hash(user.password))
     db.add(db_user)
+    
     try:
         db.commit()
     except IntegrityError:
@@ -135,13 +146,17 @@ def create_user(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A user with this email already exists",
         )
+        
     db.refresh(db_user)
+    
+    # 5. Send welcome email
     send_welcome_email(
         to=db_user.email,
         full_name=db_user.full_name,
         role=db_user.role.value,
         temp_password=user.password,
     )
+    
     return db_user
 
 
