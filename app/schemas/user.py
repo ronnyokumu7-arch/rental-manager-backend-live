@@ -1,4 +1,4 @@
-from datetime import datetime, date # ✅ Import date
+from datetime import datetime, date
 from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field
 from app.models.users import UserRole
@@ -11,11 +11,11 @@ class UserBase(BaseModel):
     is_active: bool = True
     
     phone_number: Optional[str] = None
-    department: Optional[str] = None
+    department: Optional[str] = None  # e.g., "Operations"
+    job_title: Optional[str] = None   # e.g., "Driver"
     permissions: List[str] = Field(default_factory=list)
     two_factor_enabled: bool = False
     
-    # ✅ FIX: Add missing compliance fields
     id_number: Optional[str] = None
     dl_number: Optional[str] = None
     dl_expiry: Optional[date] = None
@@ -33,10 +33,10 @@ class UserUpdate(BaseModel):
     
     phone_number: Optional[str] = None
     department: Optional[str] = None
+    job_title: Optional[str] = None
     permissions: Optional[List[str]] = None
     two_factor_enabled: Optional[bool] = None
     
-    # ✅ FIX: Add missing compliance fields
     id_number: Optional[str] = None
     dl_number: Optional[str] = None
     dl_expiry: Optional[date] = None
@@ -53,11 +53,11 @@ class UserOut(BaseModel):
     
     phone_number: Optional[str] = None
     department: Optional[str] = None
+    job_title: Optional[str] = None
     permissions: List[str] = Field(default_factory=list)
     two_factor_enabled: bool = False
     last_login_at: Optional[datetime] = None
     
-    # ✅ FIX: Add missing compliance fields
     id_number: Optional[str] = None
     dl_number: Optional[str] = None
     dl_expiry: Optional[date] = None

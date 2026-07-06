@@ -23,7 +23,8 @@ class User(Base):
     
     # Contact & Role Details
     phone_number = Column(String, nullable=True)
-    department = Column(String, nullable=True)  # e.g., "Driver", "Dispatcher"
+    department = Column(String, nullable=True)  # e.g., "Operations", "Finance & Accounts"
+    job_title = Column(String, nullable=True)   # e.g., "Driver", "Fleet Manager", "Accountant"
     
     # Security & Access (Upgraded to JSONB)
     permissions = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list)
