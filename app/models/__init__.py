@@ -1,4 +1,3 @@
-# app/models/__init__.py
 from app.models.bookings import Booking
 from app.models.clients import Client
 from app.models.contracts import Contract
@@ -11,6 +10,7 @@ from app.models.tenant_profile import TenantProfile
 from app.models.tenants import Tenant
 from app.models.users import User
 from app.models.vehicles import Vehicle
+from app.models.activity_log import ActivityLog  # ✅ NEW
 
 __all__ = [
     "Booking",
@@ -25,4 +25,5 @@ __all__ = [
     "Tenant",
     "User",
     "Vehicle",
+    "ActivityLog",  # ✅ NEW
 ]

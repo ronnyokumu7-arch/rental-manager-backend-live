@@ -10,7 +10,7 @@ from app.routers import (
     admin, auth, bookings, clients, contracts,
     invoices, payments, reports, subscriptions,
     tenant_policies, tenant_profile, tenants,
-    users, vehicles,
+    users, vehicles, activity_logs,  # ✅ ADDED activity_logs
 )
 from app.scripts.seed_superadmin import update_password
 
@@ -23,7 +23,6 @@ async def lifespan(app: FastAPI):
         print("Seed initialization completed.")
     except Exception as e:
         print(f"Warning: Seed initialization encountered an error: {e}")
-    
     start_scheduler()
     yield
     stop_scheduler()
@@ -38,15 +37,13 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# 3. CORS Configuration - Read from environment variables
-# Parse CORS_ORIGINS from environment variable (JSON string) or use default
+# 3. CORS Configuration
 import json
 cors_origins_env = os.getenv("CORS_ORIGINS")
 if cors_origins_env:
     try:
         origins = json.loads(cors_origins_env)
     except:
-        # Fallback to default if parsing fails
         origins = [
             "http://localhost:3000",
             "http://localhost:3002",
@@ -54,16 +51,15 @@ if cors_origins_env:
             "https://rental-manager-frontend.vercel.app",
         ]
 else:
-    # Use default origins from settings
     origins = settings.cors_origins
 
-print(f"🌍 CORS Origins configured: {origins}")
+print(f" CORS Origins configured: {origins}")
 
 # 4. Add CORS Middleware
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=True,  # CRITICAL: Must be True for cookies/auth
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -71,7 +67,6 @@ app.add_middleware(
 # 5. Mount directories
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
-
 if os.path.exists("./storage/contracts"):
     app.mount("/contracts", StaticFiles(directory="./storage/contracts"), name="contracts")
 
@@ -91,7 +86,7 @@ routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports
+    admin, reports, activity_logs  # ✅ ADDED activity_logs
 ]
 
 for router in routers:
