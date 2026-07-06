@@ -12,7 +12,8 @@ router = APIRouter(prefix="/role-templates", tags=["role_templates"])
 
 @router.get("/matrix")
 def get_permission_matrix(
-    current_user: User = require_role([UserRole.tenant_admin, UserRole.super_admin]),
+    # ✅ FIX: Wrapped in Depends()
+    current_user: User = Depends(require_role([UserRole.tenant_admin, UserRole.super_admin])),
 ):
     """Returns the master dictionary of all possible permissions for the UI to render."""
     return PERMISSION_CATEGORIES
@@ -20,7 +21,8 @@ def get_permission_matrix(
 @router.get("/", response_model=List[RoleTemplateOut])
 def list_templates(
     db: Session = Depends(get_db),
-    current_user: User = require_role([UserRole.tenant_admin, UserRole.super_admin]),
+    # ✅ FIX: Wrapped in Depends()
+    current_user: User = Depends(require_role([UserRole.tenant_admin, UserRole.super_admin])),
 ):
     """Returns all role templates for the current tenant."""
     return db.query(RoleTemplate).filter(RoleTemplate.tenant_id == current_user.tenant_id).all()
@@ -30,7 +32,8 @@ def update_template(
     template_id: int,
     payload: RoleTemplateUpdate,
     db: Session = Depends(get_db),
-    current_user: User = require_role([UserRole.tenant_admin, UserRole.super_admin]),
+    # ✅ FIX: Wrapped in Depends()
+    current_user: User = Depends(require_role([UserRole.tenant_admin, UserRole.super_admin])),
 ):
     """Updates the default permissions for a specific job title."""
     template = db.query(RoleTemplate).filter(
