@@ -10,7 +10,7 @@ from app.routers import (
     admin, auth, bookings, clients, contracts,
     invoices, payments, reports, subscriptions,
     tenant_policies, tenant_profile, tenants,
-    users, vehicles, activity_logs,  # ✅ ADDED activity_logs
+    users, vehicles, activity_logs,
 )
 from app.scripts.seed_superadmin import update_password
 
@@ -53,7 +53,7 @@ if cors_origins_env:
 else:
     origins = settings.cors_origins
 
-print(f" CORS Origins configured: {origins}")
+print(f"🌍 CORS Origins configured: {origins}")
 
 # 4. Add CORS Middleware
 app.add_middleware(
@@ -86,7 +86,7 @@ routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, contracts,
-    admin, reports, activity_logs  # ✅ ADDED activity_logs
+    admin, reports, activity_logs
 ]
 
 for router in routers:
