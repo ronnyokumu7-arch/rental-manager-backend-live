@@ -176,6 +176,7 @@ def create_client(
     
     # ✅ TRIGGER: Client Created
     _dispatch_client_tasks(db_client, "created", db)
+    db.commit()
     
     return db_client
 
@@ -296,6 +297,7 @@ def suspend_client(
     
     # ✅ TRIGGER: Client Suspended
     _dispatch_client_tasks(client, "suspended", db)
+    db.commit()
     
     return client
 
@@ -451,6 +453,7 @@ async def upload_id_document(
     
     # ✅ TRIGGER: Document Uploaded
     _dispatch_client_tasks(client, "document_uploaded", db)
+    db.commit()
     
     return client
 
@@ -481,5 +484,6 @@ async def upload_dl_document(
     
     # ✅ TRIGGER: Document Uploaded
     _dispatch_client_tasks(client, "document_uploaded", db)
+    db.commit()
     
     return client
