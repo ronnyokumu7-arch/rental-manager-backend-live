@@ -25,11 +25,11 @@ class TaskAutomationService:
         
         for user in users_with_expiring_dl:
             days_left = (user.dl_expiry - today).days
-            # ✅ STRICT ROUTING: Looks for "HR"
+            # Smart Router: Try to find HR/Manager, fallback to Unassigned Pool
             TaskAutomationService._smart_create_task(
                 db=db, 
                 tenant_id=user.tenant_id,
-                target_role="HR", 
+                target_role="HR", # The system will look for this role
                 title=f"Renew Driver's License ({user.full_name})",
                 description=f"Driver's license expires in {days_left} days ({user.dl_expiry.strftime('%Y-%m-%d')}).",
                 category="compliance", 
@@ -52,11 +52,9 @@ class TaskAutomationService:
                 days_overdue = (today.date() - invoice.due_date.date()).days
             else:
                 days_overdue = (today - invoice.due_date).days
-
             amount = getattr(invoice, 'total_amount', getattr(invoice, 'amount', 'N/A'))
             inv_number = getattr(invoice, 'invoice_number', getattr(invoice, 'id', 'Unknown'))
-            
-            # ✅ STRICT ROUTING: Looks for "Accountant"
+            # Smart Router: Try to find Accountant/Credit Control
             TaskAutomationService._smart_create_task(
                 db=db, 
                 tenant_id=invoice.tenant_id,
@@ -77,16 +75,13 @@ class TaskAutomationService:
             Vehicle.status != "retired",
             Vehicle.tenant_id != None
         ).all()
-
         for vehicle in vehicles:
             next_service = getattr(vehicle, 'next_service_date', None)
             insurance_expiry = getattr(vehicle, 'insurance_expiry', None)
             plate = getattr(vehicle, 'plate_number', getattr(vehicle, 'license_plate', 'Vehicle'))
-            
             # A. Service Due
             if next_service and hasattr(next_service, 'date'):
                 if next_service.date() >= today.date() and next_service.date() <= (today + timedelta(days=14)).date():
-                    # ✅ STRICT ROUTING: Looks for "Fleet Manager"
                     TaskAutomationService._smart_create_task(
                         db=db, 
                         tenant_id=vehicle.tenant_id,
@@ -99,12 +94,10 @@ class TaskAutomationService:
                         target_type="vehicle", 
                         target_id=vehicle.id
                     )
-
             # B. Insurance Expiring
             if insurance_expiry and hasattr(insurance_expiry, 'date'):
                 if insurance_expiry.date() >= today.date() and insurance_expiry.date() <= (today + timedelta(days=30)).date():
                     days_left = (insurance_expiry.date() - today.date()).days
-                    # ✅ STRICT ROUTING: Looks for "Fleet Manager"
                     TaskAutomationService._smart_create_task(
                         db=db, 
                         tenant_id=vehicle.tenant_id,
@@ -117,9 +110,8 @@ class TaskAutomationService:
                         target_type="vehicle", 
                         target_id=vehicle.id
                     )
-
         db.commit()
-
+    
     @staticmethod
     def _smart_create_task(
         db: Session, 
@@ -139,7 +131,6 @@ class TaskAutomationService:
         2. If found, assigns directly (Status: upcoming).
         3. If NOT found, drops into Unassigned Pool (Status: unassigned).
         """
-        
         # 1. Check for existing duplicate tasks
         existing = db.query(Task).filter(
             Task.tenant_id == tenant_id,
@@ -148,17 +139,14 @@ class TaskAutomationService:
             Task.status != TaskStatus.completed,
             Task.status != TaskStatus.unassigned # Allow unassigned tasks to be re-evaluated
         ).first()
-        
         if existing:
             return
-
         # 2. Smart Routing Logic
         assignee = db.query(User).filter(
             User.job_title == target_role,
             User.tenant_id == tenant_id,
             User.is_active == True
         ).first()
-
         if assignee:
             # Primary Routing: Assign to the actual user
             final_user_id = assignee.id
@@ -169,7 +157,6 @@ class TaskAutomationService:
             final_user_id = None
             final_status = TaskStatus.unassigned
             final_requires_role = target_role
-
         # 3. Create the Task
         task = Task(
             tenant_id=tenant_id,
