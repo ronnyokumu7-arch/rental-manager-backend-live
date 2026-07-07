@@ -26,17 +26,14 @@ def get_my_tasks(
     current_user: User = Depends(get_current_user)
 ):
     """Fetch tasks specifically assigned to the current user."""
-    # ✅ SECURITY: Strict tenant isolation + user assignment
     query = db.query(Task).filter(
         Task.tenant_id == current_user.tenant_id,
         Task.user_id == current_user.id,
-        Task.is_archived == False # Don't show archived tasks in the live feed
+        Task.is_archived == False
     )
     
-    if status: 
-        query = query.filter(Task.status == status)
-    if category: 
-        query = query.filter(Task.category == category)
+    if status: query = query.filter(Task.status == status)
+    if category: query = query.filter(Task.category == category)
     
     tasks = query.order_by(Task.due_date.asc(), Task.priority.desc()).limit(limit).all()
     
@@ -79,7 +76,7 @@ def claim_task(
     task = db.query(Task).filter(
         Task.id == task_id,
         Task.tenant_id == current_user.tenant_id,
-        Task.user_id == None, # Must be unassigned
+        Task.user_id == None,
         Task.status == TaskStatus.unassigned
     ).first()
     
@@ -87,7 +84,7 @@ def claim_task(
         raise HTTPException(status_code=404, detail="Task not found or already claimed")
         
     task.user_id = current_user.id
-    task.status = TaskStatus.pending # Moves from unassigned to active
+    task.status = TaskStatus.pending
     db.commit()
     db.refresh(task)
     return task
@@ -97,7 +94,7 @@ def assign_task(
     task_id: int,
     payload: dict, # Expects {"user_id": 123}
     db: Session = Depends(get_db),
-    current_user: User = admin_or_above # ✅ Admin only
+    current_user: User = admin_or_above
 ):
     """Allow an Admin to manually assign an unassigned task to a specific user."""
     if "user_id" not in payload:
@@ -112,7 +109,6 @@ def assign_task(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
         
-    # Verify the target user belongs to the same tenant
     target_user = db.query(User).filter(
         User.id == payload["user_id"],
         User.tenant_id == current_user.tenant_id
@@ -123,7 +119,7 @@ def assign_task(
         
     task.user_id = target_user.id
     task.status = TaskStatus.upcoming
-    task.requires_role = None # Clear the required role since it's now assigned
+    task.requires_role = None
     db.commit()
     db.refresh(task)
     return task
@@ -136,7 +132,6 @@ def update_task(
     current_user: User = Depends(get_current_user)
 ):
     """Update task status (e.g., mark as completed)."""
-    # ✅ SECURITY: Ensure the task belongs to the current user
     task = db.query(Task).filter(
         Task.id == task_id,
         Task.tenant_id == current_user.tenant_id,
@@ -150,7 +145,6 @@ def update_task(
     for field, value in update_data.items():
         setattr(task, field, value)
     
-    # If marking as completed, stamp the time
     if task_update.status == TaskStatus.completed and not task.completed_at:
         task.completed_at = datetime.now()
     
@@ -168,7 +162,6 @@ def create_task(
     current_user: User = Depends(get_current_user)
 ):
     """Manually create a task. If no user_id is provided, it goes to the Unassigned Pool."""
-    # ✅ SECURITY: Auto-assign tenant_id from the current user's token
     db_task = Task(
         **task.model_dump(), 
         tenant_id=current_user.tenant_id, 
@@ -176,7 +169,6 @@ def create_task(
         created_by=current_user.id
     )
     
-    # If no user is specified, send it to the pool
     if not db_task.user_id:
         db_task.status = TaskStatus.unassigned
         
@@ -191,7 +183,7 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a task. Admins can delete any task in their tenant; users can only delete their own."""
+    """Delete a task."""
     task = db.query(Task).filter(
         Task.id == task_id,
         Task.tenant_id == current_user.tenant_id 
