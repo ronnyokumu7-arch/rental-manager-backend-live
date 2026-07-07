@@ -15,7 +15,7 @@ router = APIRouter(prefix="/tasks", tags=["tasks"])
 admin_or_above = Depends(require_role([UserRole.super_admin, UserRole.tenant_admin]))
 
 # ---------------------------------------------------------------------------
-# 1. PERSONAL TASKS (For the individual user)
+# 1. PERSONAL TASKS
 # ---------------------------------------------------------------------------
 @router.get("/my-tasks", response_model=List[TaskOut])
 def get_my_tasks(
@@ -25,37 +25,32 @@ def get_my_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Fetch tasks specifically assigned to the current user."""
     query = db.query(Task).filter(
         Task.tenant_id == current_user.tenant_id,
         Task.user_id == current_user.id,
         Task.is_archived == False
     )
-    
     if status: query = query.filter(Task.status == status)
     if category: query = query.filter(Task.category == category)
     
     tasks = query.order_by(Task.due_date.asc(), Task.priority.desc()).limit(limit).all()
     
-    # Auto-update status dynamically based on due date
     now = datetime.now()
     for task in tasks:
         if task.status == TaskStatus.upcoming and task.due_date and task.due_date <= now:
             task.status = TaskStatus.pending
-            
     db.commit()
     return tasks
 
 # ---------------------------------------------------------------------------
-# 2. THE UNASSIGNED POOL (For Admins/Managers to manage orphaned tasks)
+# 2. THE UNASSIGNED POOL (Admin Only)
 # ---------------------------------------------------------------------------
 @router.get("/unassigned", response_model=List[TaskOut])
 def get_unassigned_tasks(
     limit: int = Query(50, le=200),
     db: Session = Depends(get_db),
-    current_user: User = admin_or_above # ✅ Admin only
+    current_user: User = admin_or_above
 ):
-    """Fetch tasks that have no user assigned (The Unassigned Pool)."""
     return db.query(Task).filter(
         Task.tenant_id == current_user.tenant_id,
         Task.user_id == None,
@@ -64,7 +59,7 @@ def get_unassigned_tasks(
     ).order_by(Task.created_at.desc()).limit(limit).all()
 
 # ---------------------------------------------------------------------------
-# 3. TASK LIFECYCLE ACTIONS (Claim, Assign, Complete)
+# 3. TASK LIFECYCLE ACTIONS
 # ---------------------------------------------------------------------------
 @router.patch("/{task_id}/claim", response_model=TaskOut)
 def claim_task(
@@ -72,7 +67,6 @@ def claim_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Allow a user to claim an unassigned task for themselves."""
     task = db.query(Task).filter(
         Task.id == task_id,
         Task.tenant_id == current_user.tenant_id,
@@ -92,11 +86,10 @@ def claim_task(
 @router.patch("/{task_id}/assign", response_model=TaskOut)
 def assign_task(
     task_id: int,
-    payload: dict, # Expects {"user_id": 123}
+    payload: dict,
     db: Session = Depends(get_db),
     current_user: User = admin_or_above
 ):
-    """Allow an Admin to manually assign an unassigned task to a specific user."""
     if "user_id" not in payload:
         raise HTTPException(status_code=400, detail="user_id is required")
         
@@ -131,7 +124,6 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update task status (e.g., mark as completed)."""
     task = db.query(Task).filter(
         Task.id == task_id,
         Task.tenant_id == current_user.tenant_id,
@@ -161,14 +153,12 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Manually create a task. If no user_id is provided, it goes to the Unassigned Pool."""
     db_task = Task(
         **task.model_dump(), 
         tenant_id=current_user.tenant_id, 
         is_system_generated=False,
         created_by=current_user.id
     )
-    
     if not db_task.user_id:
         db_task.status = TaskStatus.unassigned
         
@@ -183,7 +173,6 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Delete a task."""
     task = db.query(Task).filter(
         Task.id == task_id,
         Task.tenant_id == current_user.tenant_id 

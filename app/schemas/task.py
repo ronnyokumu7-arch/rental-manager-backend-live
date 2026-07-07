@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 from pydantic import BaseModel
 from app.models.task import TaskStatus, TaskPriority
 
@@ -14,7 +14,7 @@ class TaskBase(BaseModel):
     location_id: Optional[int] = None
 
 class TaskCreate(TaskBase):
-    # ✅ user_id is now optional to support the Unassigned Pool
+    # ✅ user_id is optional to support the Unassigned Pool
     user_id: Optional[int] = None 
     is_system_generated: bool = True
     created_by: Optional[int] = None

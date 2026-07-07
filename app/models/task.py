@@ -5,7 +5,7 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 class TaskStatus(str, enum.Enum):
-    unassigned = "unassigned"  # ✅ NEW: Waiting for Admin to claim/assign
+    unassigned = "unassigned"  # ✅ Waiting for Admin to claim/assign
     upcoming = "upcoming"
     pending = "pending"
     completed = "completed"
