@@ -13,12 +13,12 @@ class VehicleBase(BaseModel):
     daily_rate: Decimal
     current_mileage: int = 0
     next_service_km: Optional[int] = None
-    insurance_number: Optional[str] = None # ✅ NEW: Policy Number
+    insurance_number: Optional[str] = None # ✅ ADDED
     insurance_expiry: Optional[datetime] = None
     notes: Optional[str] = None
 
 class VehicleCreate(VehicleBase):
-    pass # Status will be forced to pending_activation by the backend router
+    pass
 
 class VehicleUpdate(BaseModel):
     make: Optional[str] = None
@@ -30,7 +30,7 @@ class VehicleUpdate(BaseModel):
     status: Optional[VehicleStatus] = None
     current_mileage: Optional[int] = None
     next_service_km: Optional[int] = None
-    insurance_number: Optional[str] = None # ✅ NEW
+    insurance_number: Optional[str] = None # ✅ ADDED
     insurance_expiry: Optional[datetime] = None
     insurance_doc: Optional[str] = None
     registration_doc: Optional[str] = None

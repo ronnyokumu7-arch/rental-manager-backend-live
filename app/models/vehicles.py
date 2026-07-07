@@ -5,7 +5,7 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 class VehicleStatus(str, enum.Enum):
-    pending_activation = "pending_activation" # ✅ NEW: Default state for new cars
+    pending_activation = "pending_activation" # ✅ CRITICAL FIX
     available = "available"
     rented = "rented"
     maintenance = "maintenance"
@@ -23,7 +23,6 @@ class Vehicle(Base):
     plate_number = Column(String, nullable=False)
     vin = Column(String, nullable=True)
     
-    # ✅ CHANGED: Default status is now pending_activation
     status = Column(
         Enum(VehicleStatus),
         nullable=False,
@@ -35,8 +34,8 @@ class Vehicle(Base):
     current_mileage = Column(Integer, nullable=False, default=0, server_default="0")
     next_service_km = Column(Integer, nullable=True)
     
-    # ✅ NEW: Insurance & Compliance Fields
-    insurance_number = Column(String, nullable=True) # Policy Number
+    # ✅ NEW: Insurance Fields
+    insurance_number = Column(String, nullable=True) 
     insurance_expiry = Column(DateTime(timezone=True), nullable=True)
     insurance_doc = Column(String, nullable=True)
     registration_doc = Column(String, nullable=True)
