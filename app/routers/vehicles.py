@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.database import get_db
@@ -6,14 +6,14 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
 from app.models.users import User
 from app.models.vehicles import Vehicle, VehicleStatus
+from app.models.task import TaskPriority # ✅ NEW: Import TaskPriority
 from app.schemas.vehicle import VehicleCreate, VehicleOut, VehicleUpdate
-# ✅ IMPORT TASK AUTOMATION SERVICE
-from app.services.task_automation import TaskAutomationService
+from app.services.task_automation import TaskAutomationService # ✅ NEW: Import Automation Service
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
 # ---------------------------------------------------------------------------
-# TASK DISPATCHER HELPER (Keeps routes clean)
+# TASK DISPATCHER HELPER (Fleet Operations Engine)
 # ---------------------------------------------------------------------------
 def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
     """Generates tasks based on vehicle lifecycle events using Smart Routing."""
@@ -25,35 +25,38 @@ def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Fleet Manager",
             title=f"Complete Onboarding Inspection for {plate}",
-            description=f"New vehicle added to fleet. Conduct initial inspection and register documents.",
-            category="fleet", priority="high",
+            description=f"New vehicle added to fleet. Conduct initial inspection, upload documents, and register.",
+            category="fleet", priority=TaskPriority.high,
             due_date=now + timedelta(hours=24),
             target_type="vehicle", target_id=vehicle.id
         )
+        
     elif action == "maintenance":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Fleet Manager",
             title=f"Track Maintenance Progress for {plate}",
-            description=f"Vehicle sent to maintenance. Track service progress and update logs.",
-            category="fleet", priority="medium",
+            description=f"Vehicle sent to maintenance. Track service progress and update logs upon return.",
+            category="fleet", priority=TaskPriority.medium,
             due_date=now + timedelta(days=3),
             target_type="vehicle", target_id=vehicle.id
         )
+        
     elif action == "reactivate":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Fleet Manager",
             title=f"Post-Maintenance Check for {plate}",
-            description=f"Vehicle reactivated. Log ending mileage, fuel level, and conduct post-service check.",
-            category="fleet", priority="high",
+            description=f"Vehicle reactivated. Log ending mileage, fuel level, and conduct post-service safety check.",
+            category="fleet", priority=TaskPriority.high,
             due_date=now + timedelta(hours=12),
             target_type="vehicle", target_id=vehicle.id
         )
+        
     elif action == "retire":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Manager",
             title=f"Process Retirement Paperwork for {plate}",
-            description=f"Vehicle retired. Update asset register and process final paperwork.",
-            category="fleet", priority="medium",
+            description=f"Vehicle retired. Update asset register, remove from insurance, and process final paperwork.",
+            category="fleet", priority=TaskPriority.medium,
             due_date=now + timedelta(days=7),
             target_type="vehicle", target_id=vehicle.id
         )
@@ -88,8 +91,9 @@ def create_vehicle(
     db.commit()
     db.refresh(db_vehicle)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Vehicle Created
     _dispatch_vehicle_tasks(db_vehicle, "created", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks
     
     return db_vehicle
 
@@ -153,8 +157,9 @@ def send_to_maintenance(
     db.commit()
     db.refresh(vehicle)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Vehicle sent to maintenance
     _dispatch_vehicle_tasks(vehicle, "maintenance", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks
     
     return vehicle
 
@@ -174,8 +179,9 @@ def reactivate_vehicle(
     db.commit()
     db.refresh(vehicle)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Vehicle reactivated
     _dispatch_vehicle_tasks(vehicle, "reactivate", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks
     
     return vehicle
 
@@ -195,8 +201,9 @@ def retire_vehicle(
     db.commit()
     db.refresh(vehicle)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Vehicle retired
     _dispatch_vehicle_tasks(vehicle, "retire", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks
     
     return vehicle
 
