@@ -19,21 +19,33 @@ class Task(Base):
     __tablename__ = "tasks"
     
     id = Column(Integer, primary_key=True, index=True)
+    
+    # ✅ SECURITY & ISOLATION: Explicitly tie every task to a tenant
+    tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    
+    # User assignment
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
     category = Column(String(50), nullable=False)  # fleet, finance, hr, booking, compliance
     status = Column(Enum(TaskStatus), nullable=False, default=TaskStatus.pending)
     priority = Column(Enum(TaskPriority), default=TaskPriority.medium)
+    
     due_date = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
+    
     is_system_generated = Column(Boolean, default=True)
-    target_type = Column(String(50), nullable=True)  # booking, invoice, vehicle, client, user
+    
+    # Polymorphic references (for linking to specific entities like invoices/vehicles)
+    target_type = Column(String(50), nullable=True)  
     target_id = Column(Integer, nullable=True)
-    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
-    # Relationships
-    user = relationship("User", backref="tasks")
+    # ✅ RELATIONSHIPS (Fixed the multiple foreign keys error)
+    tenant = relationship("Tenant", backref="tasks")
+    user = relationship("User", foreign_keys=[user_id], backref="tasks")
     creator = relationship("User", foreign_keys=[created_by])

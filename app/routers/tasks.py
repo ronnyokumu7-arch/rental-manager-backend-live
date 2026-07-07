@@ -18,8 +18,12 @@ def get_my_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Get tasks for the current user"""
-    query = db.query(Task).filter(Task.user_id == current_user.id)
+    # ✅ SECURITY: Filter by BOTH tenant_id and user_id
+    query = db.query(Task).filter(
+        Task.tenant_id == current_user.tenant_id,
+        Task.user_id == current_user.id
+    )
+    
     if status: query = query.filter(Task.status == status)
     if category: query = query.filter(Task.category == category)
     
@@ -33,6 +37,27 @@ def get_my_tasks(
     db.commit()
     return tasks
 
+@router.post("/", response_model=TaskOut)
+def create_task(
+    task: TaskCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Only admins can create tasks for other users
+    if task.user_id != current_user.id and current_user.role not in ["tenant_admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only admins can assign tasks to others")
+    
+    # ✅ SECURITY: Auto-assign tenant_id from the current user's token (Prevents spoofing)
+    db_task = Task(
+        **task.model_dump(), 
+        tenant_id=current_user.tenant_id, 
+        is_system_generated=False
+    )
+    db.add(db_task)
+    db.commit()
+    db.refresh(db_task)
+    return db_task
+
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(
     task_id: int,
@@ -40,8 +65,13 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update task status (complete, etc.)"""
-    task = db.query(Task).filter(Task.id == task_id, Task.user_id == current_user.id).first()
+    # ✅ SECURITY: Ensure the task belongs to the current user's tenant AND user
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.tenant_id == current_user.tenant_id, 
+        Task.user_id == current_user.id
+    ).first()
+    
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     
@@ -55,3 +85,27 @@ def update_task(
     db.commit()
     db.refresh(task)
     return task
+
+@router.delete("/{task_id}", status_code=204)
+def delete_task(
+    task_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # ✅ SECURITY: Ensure the task belongs to the current user's tenant
+    task = db.query(Task).filter(
+        Task.id == task_id,
+        Task.tenant_id == current_user.tenant_id 
+    ).first()
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    if task.user_id != current_user.id and current_user.role not in ["tenant_admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Not authorized")
+    
+    if task.is_system_generated and current_user.role not in ["tenant_admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Cannot delete system-generated tasks")
+    
+    db.delete(task)
+    db.commit()
