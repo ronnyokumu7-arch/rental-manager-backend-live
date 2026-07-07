@@ -10,15 +10,15 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
 from app.models.clients import Client, ClientStatus
 from app.models.users import User
+from app.models.task import TaskPriority # ✅ NEW: Import TaskPriority
 from app.schemas.client import ClientCreate, ClientOut, ClientUpdate
 from app.services.storage import upload_file, delete_file
-# ✅ IMPORT TASK AUTOMATION SERVICE
-from app.services.task_automation import TaskAutomationService
+from app.services.task_automation import TaskAutomationService # ✅ NEW: Import Automation Service
 
 router = APIRouter(prefix="/clients", tags=["clients"])
 
 # ---------------------------------------------------------------------------
-# TASK DISPATCHER HELPER (Keeps routes clean)
+# TASK DISPATCHER HELPER (Client Onboarding Engine)
 # ---------------------------------------------------------------------------
 def _dispatch_client_tasks(client: Client, action: str, db: Session):
     """Generates tasks based on client lifecycle events using Smart Routing."""
@@ -26,39 +26,42 @@ def _dispatch_client_tasks(client: Client, action: str, db: Session):
     now = datetime.now(timezone.utc)
     
     if action == "created":
+        # Task 1: Verify ID
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Sales Agent",
-            title=f"Verify Documents for New Client: {client.full_name}",
-            description=f"New client onboarded. Please verify their ID and Driver's License documents.",
-            category="compliance", priority="high",
+            title=f"Verify ID Documents for {client.full_name}",
+            description=f"New client onboarded. Please verify their ID documents.",
+            category="compliance", priority=TaskPriority.high,
             due_date=now + timedelta(hours=24),
             target_type="client", target_id=client.id
         )
+        # Task 2: Verify DL
+        TaskAutomationService._smart_create_task(
+            db=db, tenant_id=tenant_id, target_role="Sales Agent",
+            title=f"Verify Driver's License for {client.full_name}",
+            description=f"New client onboarded. Please verify their Driver's License.",
+            category="compliance", priority=TaskPriority.high,
+            due_date=now + timedelta(hours=24),
+            target_type="client", target_id=client.id
+        )
+        
     elif action == "document_uploaded":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Sales Agent",
             title=f"Review Uploaded Documents for {client.full_name}",
             description=f"Client has uploaded new identification documents. Please review and approve.",
-            category="compliance", priority="high",
+            category="compliance", priority=TaskPriority.high,
             due_date=now + timedelta(hours=12),
             target_type="client", target_id=client.id
         )
+        
     elif action == "suspended":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Manager",
             title=f"Review Suspended Client: {client.full_name}",
             description=f"Client has been suspended. Review reason and notify sales team if necessary.",
-            category="compliance", priority="medium",
+            category="compliance", priority=TaskPriority.medium,
             due_date=now + timedelta(hours=24),
-            target_type="client", target_id=client.id
-        )
-    elif action == "reactivated":
-        TaskAutomationService._smart_create_task(
-            db=db, tenant_id=tenant_id, target_role="Sales Agent",
-            title=f"Welcome Back Client: {client.full_name}",
-            description=f"Client has been reactivated. Update CRM notes and reach out.",
-            category="booking", priority="low",
-            due_date=now + timedelta(days=2),
             target_type="client", target_id=client.id
         )
 
@@ -171,7 +174,7 @@ def create_client(
         )
     db.refresh(db_client)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Client Created
     _dispatch_client_tasks(db_client, "created", db)
     
     return db_client
@@ -291,7 +294,7 @@ def suspend_client(
     db.commit()
     db.refresh(client)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Client Suspended
     _dispatch_client_tasks(client, "suspended", db)
     
     return client
@@ -321,10 +324,6 @@ def reactivate_client(
     client.status = ClientStatus.active
     db.commit()
     db.refresh(client)
-    
-    # ✅ TRIGGER TASKS
-    _dispatch_client_tasks(client, "reactivated", db)
-    
     return client
 
 # ---------------------------------------------------------------------------
@@ -450,7 +449,7 @@ async def upload_id_document(
     db.commit()
     db.refresh(client)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Document Uploaded
     _dispatch_client_tasks(client, "document_uploaded", db)
     
     return client
@@ -480,7 +479,7 @@ async def upload_dl_document(
     db.commit()
     db.refresh(client)
     
-    # ✅ TRIGGER TASKS
+    # ✅ TRIGGER: Document Uploaded
     _dispatch_client_tasks(client, "document_uploaded", db)
     
     return client
