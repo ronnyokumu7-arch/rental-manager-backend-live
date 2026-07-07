@@ -153,12 +153,21 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Only admins can create tasks for other users
+    if task.user_id and task.user_id != current_user.id and current_user.role not in ["tenant_admin", "super_admin"]:
+        raise HTTPException(status_code=403, detail="Only admins can assign tasks to others")
+    
+    # ✅ FIX: Exclude fields that we are going to override manually to prevent the "multiple values" error
+    task_data = task.model_dump(exclude={"is_system_generated", "created_by"})
+    
+    # ✅ SECURITY: Auto-assign tenant_id from the current user's token (Prevents spoofing)
     db_task = Task(
-        **task.model_dump(), 
-        tenant_id=current_user.tenant_id, 
+        **task_data,
+        tenant_id=current_user.tenant_id,
         is_system_generated=False,
         created_by=current_user.id
     )
+    
     if not db_task.user_id:
         db_task.status = TaskStatus.unassigned
         
