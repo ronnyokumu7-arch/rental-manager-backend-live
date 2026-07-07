@@ -1,8 +1,9 @@
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-import os
+
 from app.core.config import get_settings
 from app.core.exceptions import http_exception_handler
 from app.jobs.scheduler import start_scheduler, stop_scheduler
@@ -10,7 +11,7 @@ from app.routers import (
     admin, auth, bookings, clients, contracts,
     invoices, payments, reports, subscriptions,
     tenant_policies, tenant_profile, tenants,
-    users, vehicles, activity_logs, role_templates, tasks, # ✅ ADDED tasks
+    users, vehicles, activity_logs, role_templates, tasks, # ✅ tasks is here
 )
 from app.scripts.seed_superadmin import update_password
 
