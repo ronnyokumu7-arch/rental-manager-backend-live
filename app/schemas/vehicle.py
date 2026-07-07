@@ -13,10 +13,12 @@ class VehicleBase(BaseModel):
     daily_rate: Decimal
     current_mileage: int = 0
     next_service_km: Optional[int] = None
+    insurance_number: Optional[str] = None # ✅ NEW: Policy Number
+    insurance_expiry: Optional[datetime] = None
     notes: Optional[str] = None
 
 class VehicleCreate(VehicleBase):
-    pass
+    pass # Status will be forced to pending_activation by the backend router
 
 class VehicleUpdate(BaseModel):
     make: Optional[str] = None
@@ -28,30 +30,22 @@ class VehicleUpdate(BaseModel):
     status: Optional[VehicleStatus] = None
     current_mileage: Optional[int] = None
     next_service_km: Optional[int] = None
+    insurance_number: Optional[str] = None # ✅ NEW
+    insurance_expiry: Optional[datetime] = None
     insurance_doc: Optional[str] = None
     registration_doc: Optional[str] = None
     inspection_doc: Optional[str] = None
-    insurance_expiry: Optional[datetime] = None
     notes: Optional[str] = None
 
-class VehicleOut(BaseModel):
+class VehicleOut(VehicleBase):
     id: int
     tenant_id: int
-    make: str
-    model: str
-    year: int
-    plate_number: str
-    vin: Optional[str] = None
     status: VehicleStatus
-    daily_rate: Decimal
-    current_mileage: int
-    next_service_km: Optional[int] = None
     insurance_doc: Optional[str] = None
     registration_doc: Optional[str] = None
     inspection_doc: Optional[str] = None
-    insurance_expiry: Optional[datetime] = None
-    notes: Optional[str] = None
+    is_archived: bool
+    archived_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-
     model_config = {"from_attributes": True}
