@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from app.db.database import get_db
@@ -6,14 +6,14 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
 from app.models.users import User
 from app.models.vehicles import Vehicle, VehicleStatus
-from app.models.task import TaskPriority # ✅ NEW: Import TaskPriority
+from app.models.task import TaskPriority # ✅ NEW
 from app.schemas.vehicle import VehicleCreate, VehicleOut, VehicleUpdate
-from app.services.task_automation import TaskAutomationService # ✅ NEW: Import Automation Service
+from app.services.task_automation import TaskAutomationService # ✅ NEW
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
 # ---------------------------------------------------------------------------
-# TASK DISPATCHER HELPER (Fleet Operations Engine)
+# ✅ TASK DISPATCHER HELPER (Fleet Operations Engine)
 # ---------------------------------------------------------------------------
 def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
     """Generates tasks based on vehicle lifecycle events using Smart Routing."""
@@ -30,7 +30,6 @@ def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
             due_date=now + timedelta(hours=24),
             target_type="vehicle", target_id=vehicle.id
         )
-        
     elif action == "maintenance":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Fleet Manager",
@@ -40,7 +39,6 @@ def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
             due_date=now + timedelta(days=3),
             target_type="vehicle", target_id=vehicle.id
         )
-        
     elif action == "reactivate":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Fleet Manager",
@@ -50,7 +48,6 @@ def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
             due_date=now + timedelta(hours=12),
             target_type="vehicle", target_id=vehicle.id
         )
-        
     elif action == "retire":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Manager",
@@ -65,7 +62,6 @@ def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
 # Business Logic Helpers
 # ---------------------------------------------------------------------------
 def _get_authorized_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
-    """Retrieve a vehicle and enforce tenant ownership."""
     vehicle = db.query(Vehicle).filter(
         Vehicle.id == vehicle_id,
         Vehicle.tenant_id == user.tenant_id

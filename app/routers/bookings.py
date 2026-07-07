@@ -11,17 +11,17 @@ from app.models.bookings import Booking, BookingStatus
 from app.models.clients import Client, ClientStatus
 from app.models.users import User
 from app.models.vehicles import Vehicle, VehicleStatus
+from app.models.task import TaskPriority # ✅ NEW
 from app.schemas.booking import BookingCreate, BookingOut, BookingUpdate
 from app.services.contracts import create_contract_for_booking
 from app.services.invoices import create_invoice_for_booking
+from app.services.task_automation import TaskAutomationService # ✅ NEW
 from app.services.email import (
     send_booking_activated,
     send_booking_cancelled,
     send_booking_completed,
     send_booking_confirmed,
 )
-# ✅ IMPORT TASK AUTOMATION SERVICE
-from app.services.task_automation import TaskAutomationService
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -35,27 +35,28 @@ def _get_booking_or_404(booking_id: int, tenant_id: int, db: Session) -> Booking
     return booking
 
 # ---------------------------------------------------------------------------
-# TASK DISPATCHER HELPER (Keeps routes clean)
+# ✅ TASK DISPATCHER HELPER (Booking Lifecycle Engine)
 # ---------------------------------------------------------------------------
 def dispatch_booking_tasks(booking: Booking, action: str, db: Session):
     """Generates tasks based on booking lifecycle events using Smart Routing."""
     tenant_id = booking.tenant_id
+    now = datetime.now(timezone.utc)
     
     if action == "confirmed":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Contracts Officer",
             title=f"Generate Rental Contract for #{booking.booking_number}",
             description=f"Booking confirmed. Draft and send the rental contract to the client.",
-            category="booking", priority="high",
-            due_date=datetime.now(timezone.utc) + timedelta(hours=24),
+            category="booking", priority=TaskPriority.high,
+            due_date=now + timedelta(hours=24),
             target_type="booking", target_id=booking.id
         )
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Cashier",
             title=f"Collect Security Deposit for #{booking.booking_number}",
             description=f"Booking confirmed. Ensure the security deposit is collected before vehicle handover.",
-            category="finance", priority="high",
-            due_date=datetime.now(timezone.utc) + timedelta(hours=24),
+            category="finance", priority=TaskPriority.high,
+            due_date=now + timedelta(hours=24),
             target_type="booking", target_id=booking.id
         )
 
@@ -64,8 +65,8 @@ def dispatch_booking_tasks(booking: Booking, action: str, db: Session):
             db=db, tenant_id=tenant_id, target_role="Dispatcher",
             title=f"Log Starting Mileage & Handover for #{booking.booking_number}",
             description=f"Vehicle handed over. Ensure starting mileage, fuel levels, and handover checklist are logged.",
-            category="fleet", priority="high",
-            due_date=datetime.now(timezone.utc) + timedelta(hours=12),
+            category="fleet", priority=TaskPriority.high,
+            due_date=now + timedelta(hours=12),
             target_type="booking", target_id=booking.id
         )
 
@@ -74,16 +75,16 @@ def dispatch_booking_tasks(booking: Booking, action: str, db: Session):
             db=db, tenant_id=tenant_id, target_role="Fleet Manager",
             title=f"Conduct Return Inspection for #{booking.booking_number}",
             description=f"Booking completed. Inspect returned vehicle, log ending mileage, and check for damages.",
-            category="fleet", priority="high",
-            due_date=datetime.now(timezone.utc) + timedelta(hours=4),
+            category="fleet", priority=TaskPriority.high,
+            due_date=now + timedelta(hours=4),
             target_type="booking", target_id=booking.id
         )
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Accountant",
             title=f"Generate Final Invoice for #{booking.booking_number}",
             description=f"Return inspection done. Generate final invoice, process deposit refund, and check for extra charges.",
-            category="finance", priority="high",
-            due_date=datetime.now(timezone.utc) + timedelta(days=2),
+            category="finance", priority=TaskPriority.high,
+            due_date=now + timedelta(days=2),
             target_type="booking", target_id=booking.id
         )
 
@@ -92,13 +93,13 @@ def dispatch_booking_tasks(booking: Booking, action: str, db: Session):
             db=db, tenant_id=tenant_id, target_role="Cashier",
             title=f"Process Cancellation Fee for #{booking.booking_number}",
             description=f"Booking cancelled. Process any applicable cancellation fees and release vehicle back to fleet.",
-            category="finance", priority="medium",
-            due_date=datetime.now(timezone.utc) + timedelta(hours=12),
+            category="finance", priority=TaskPriority.medium,
+            due_date=now + timedelta(hours=12),
             target_type="booking", target_id=booking.id
         )
 
 # ---------------------------------------------------------------------------
-# LIST BOOKINGS
+# ROUTES
 # ---------------------------------------------------------------------------
 @router.get("/", response_model=list[BookingOut])
 def list_bookings(
@@ -127,9 +128,6 @@ def list_archived_bookings(
         Booking.is_archived == True,
     ).order_by(Booking.archived_at.desc()).all()
 
-# ---------------------------------------------------------------------------
-# GET SINGLE BOOKING
-# ---------------------------------------------------------------------------
 @router.get("/{booking_id}", response_model=BookingOut)
 def get_booking(
     booking_id: int,
@@ -139,7 +137,7 @@ def get_booking(
     return _get_booking_or_404(booking_id, current_user.tenant_id, db)
 
 # ---------------------------------------------------------------------------
-# CREATE BOOKING
+# CREATE BOOKING (✅ FIXED: Booking Number Format)
 # ---------------------------------------------------------------------------
 @router.post("/", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
 def create_booking(
@@ -165,26 +163,28 @@ def create_booking(
     if vehicle.status != VehicleStatus.available or vehicle.is_archived:
         raise HTTPException(status_code=409, detail="Vehicle is not available.")
 
-    # Generate Custom Booking Number (e.g., BK-010726)
+    # ✅ FIXED: Generate Custom Booking Number (Format: YYMM-XX e.g., 2607-01)
     now = datetime.now(timezone.utc)
-    current_month = now.month
-    current_year = now.year % 100
-    prefix = f"BK-{current_month:02d}{current_year:02d}"
+    yy = now.year % 100
+    mm = now.month
+    prefix = f"{yy:02d}{mm:02d}" # e.g., "2607"
     
+    # Find the highest booking number for this specific month
     last_booking = db.query(Booking.booking_number).filter(
         Booking.booking_number.like(f"{prefix}-%")
     ).order_by(Booking.booking_number.desc()).first()
     
     if last_booking and last_booking[0]:
         try:
-            last_counter = int(last_booking[0].split("-")[1][:2])
+            # Extract the counter after the hyphen (e.g., "2607-05" -> 5)
+            last_counter = int(last_booking[0].split("-")[1])
             new_counter = last_counter + 1
         except (ValueError, IndexError):
             new_counter = 1
     else:
         new_counter = 1
         
-    new_booking_number = f"{prefix}-{new_counter:02d}"
+    new_booking_number = f"{prefix}-{new_counter:02d}" # e.g., "2607-01"
 
     db_booking = Booking(
         **booking.model_dump(),
@@ -197,9 +197,6 @@ def create_booking(
     db.refresh(db_booking)
     return db_booking
 
-# ---------------------------------------------------------------------------
-# UPDATE BOOKING
-# ---------------------------------------------------------------------------
 @router.patch("/{booking_id}", response_model=BookingOut)
 def update_booking(
     booking_id: int,
@@ -215,16 +212,12 @@ def update_booking(
     db.refresh(booking)
     return booking
 
-# ---------------------------------------------------------------------------
-# GENERATE DRAFT INVOICE (Acts as the v1 "Quotation")
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/generate-invoice")
 def generate_invoice(
     booking_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """Generate a draft invoice (acting as a quotation) to share with the client."""
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     invoice = create_invoice_for_booking(booking, db)
     
@@ -262,6 +255,7 @@ def confirm_booking(
 
     # ✅ TRIGGER TASKS
     dispatch_booking_tasks(booking, "confirmed", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks to the database
 
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
@@ -300,6 +294,7 @@ def activate_booking(
 
     # ✅ TRIGGER TASKS
     dispatch_booking_tasks(booking, "activated", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks
 
     if client.email:
         send_booking_activated(
@@ -330,6 +325,7 @@ def complete_booking(
 
     # ✅ TRIGGER TASKS
     dispatch_booking_tasks(booking, "completed", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks
 
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     if client and client.email:
@@ -362,6 +358,7 @@ def cancel_booking(
 
     # ✅ TRIGGER TASKS
     dispatch_booking_tasks(booking, "cancelled", db)
+    db.commit() # ✅ CRITICAL: Commit the tasks
 
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
@@ -388,9 +385,6 @@ def no_show_booking(
     db.refresh(booking)
     return booking
 
-# ---------------------------------------------------------------------------
-# ARCHIVE & RESTORE
-# ---------------------------------------------------------------------------
 @router.post("/{booking_id}/archive", response_model=BookingOut)
 def archive_booking(
     booking_id: int,
@@ -423,9 +417,6 @@ def restore_booking(
     db.refresh(booking)
     return booking
 
-# ---------------------------------------------------------------------------
-# DELETE
-# ---------------------------------------------------------------------------
 @router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_booking(
     booking_id: int,
