@@ -5,6 +5,7 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 class TaskStatus(str, enum.Enum):
+    unassigned = "unassigned"  # ✅ NEW: Waiting for Admin to claim/assign
     upcoming = "upcoming"
     pending = "pending"
     completed = "completed"
@@ -20,12 +21,18 @@ class Task(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     
-    # ✅ SECURITY & ISOLATION: Explicitly tie every task to a tenant
+    # ✅ SECURITY & ISOLATION
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     
-    # User assignment
-    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    # ✅ FUTURE-PROOFING: Multi-branch support (Nullable for now)
+    location_id = Column(Integer, nullable=True, index=True)
+    
+    # ✅ USER ASSIGNMENT & UNASSIGNED POOL
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    
+    # ✅ SMART ROUTING: Remembers what role this task was meant for if unassigned
+    requires_role = Column(String(50), nullable=True)
     
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
@@ -38,14 +45,17 @@ class Task(Base):
     
     is_system_generated = Column(Boolean, default=True)
     
-    # Polymorphic references (for linking to specific entities like invoices/vehicles)
+    # ✅ DATA LIFECYCLE: For the 30-90 day archiving strategy
+    is_archived = Column(Boolean, default=False, server_default="false")
+    
+    # Polymorphic references
     target_type = Column(String(50), nullable=True)  
     target_id = Column(Integer, nullable=True)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
-    # ✅ RELATIONSHIPS (Fixed the multiple foreign keys error)
+    # ✅ RELATIONSHIPS (Fixed multiple foreign keys error)
     tenant = relationship("Tenant", backref="tasks")
-    user = relationship("User", foreign_keys=[user_id], backref="tasks")
+    user = relationship("User", foreign_keys=[user_id], backref="assigned_tasks")
     creator = relationship("User", foreign_keys=[created_by])
