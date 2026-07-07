@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+
 from app.core.security import get_password_hash, normalize_email
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
@@ -9,7 +10,6 @@ from app.models.tenants import Tenant
 from app.models.users import User, UserRole
 from app.schemas.user import UserCreate, UserOut, UserUpdate
 from app.services.email import send_welcome_email, send_password_changed
-
 from app.models.role_template import RoleTemplate
 from app.core.permissions import ALL_PERMISSION_KEYS
 
@@ -17,6 +17,48 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 # The Bouncers: Only super_admin and tenant_admin can perform these actions
 admin_or_above = Depends(require_role([UserRole.super_admin, UserRole.tenant_admin]))
+
+# ---------------------------------------------------------------------------
+# STRICT MATRIX ENFORCEMENT (Locking in the exact operational roles)
+# ---------------------------------------------------------------------------
+VALID_ADMIN_TITLES = {"Director", "Manager", "HR"}
+
+VALID_STAFF_DEPARTMENTS = {
+    "Fleet & Operations": {"Fleet Manager", "Dispatcher", "Driver"},
+    "Finance": {"Accountant", "Cashier"},
+    "Sales & Contracts": {"Sales Agent", "Contracts Officer"},
+}
+
+def _validate_job_title_and_department(role: UserRole, department: str | None, job_title: str | None) -> None:
+    """
+    High-precision validation to ensure no generic or unauthorized titles 
+    slip into the database.
+    """
+    if role == UserRole.super_admin:
+        return  # System admins don't follow tenant matrix rules
+
+    if role == UserRole.tenant_admin:
+        if job_title and job_title not in VALID_ADMIN_TITLES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail=f"Invalid admin title. Must be one of: {', '.join(VALID_ADMIN_TITLES)}"
+            )
+    elif role == UserRole.tenant_staff:
+        if not department or not job_title:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail="Staff members must have both a department and a job title assigned."
+            )
+        if department not in VALID_STAFF_DEPARTMENTS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail=f"Invalid department. Must be one of: {', '.join(VALID_STAFF_DEPARTMENTS.keys())}"
+            )
+        if job_title not in VALID_STAFF_DEPARTMENTS[department]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, 
+                detail=f"Invalid job title for department '{department}'. Must be one of: {', '.join(VALID_STAFF_DEPARTMENTS[department])}"
+            )
 
 # ---------------------------------------------------------------------------
 # Business Logic Helpers
@@ -68,12 +110,11 @@ def _enforce_staff_permission(current_user: User, target_user: User, action: str
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
-
 @router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(
     user: UserCreate,
     db: Session = Depends(get_db),
-    current_user: User = admin_or_above, # ✅ Only admins can create
+    current_user: User = admin_or_above, # Only admins can create
 ):
     # 1. Prepare data and normalize email
     user_data = user.model_dump(exclude={"password"})
@@ -83,41 +124,42 @@ def create_user(
     if user.role != UserRole.super_admin and not user_data.get("tenant_id"):
         user_data["tenant_id"] = current_user.tenant_id
 
-    # 3. Run validation checks
+    # 3. HIGH PRECISION: Enforce strict job title/department matrix
+    _validate_job_title_and_department(
+        user.role, 
+        user_data.get("department"), 
+        user_data.get("job_title")
+    )
+
+    # 4. Run standard validation checks
     _enforce_create_permission(current_user, user.role, user_data.get("tenant_id"))
     _validate_tenant_for_role(db, user.role, user_data.get("tenant_id"))
 
-    # 4. Ensure super_admins have no tenant_id
+    # 5. Ensure super_admins have no tenant_id
     if user.role == UserRole.super_admin:
         user_data["tenant_id"] = None
 
-    # 5. Create the user instance
+    # 6. Create the user instance
     db_user = User(**user_data, password_hash=get_password_hash(user.password))
     
-    # ✅ 6. AUTO-ASSIGN PERMISSIONS BASED ON ROLE TEMPLATE
+    # 7. AUTO-ASSIGN PERMISSIONS BASED ON ROLE TEMPLATE
     if user_data.get("job_title"):
-        # Look for a custom template defined in the Settings page
         template = db.query(RoleTemplate).filter(
             RoleTemplate.tenant_id == user_data["tenant_id"],
             RoleTemplate.job_title == user_data["job_title"]
         ).first()
-        
         if template:
             db_user.permissions = template.permissions
         elif user.role == UserRole.tenant_admin:
-            # Fallback for Admins without a template: Grant ALL permissions
             db_user.permissions = ALL_PERMISSION_KEYS
         else:
-            # Fallback for Staff without a template: Basic view permissions
             db_user.permissions = ["view_dashboard", "view_bookings", "view_clients"]
     elif user.role == UserRole.tenant_admin:
-        # Admins without a job_title still get full access
         db_user.permissions = ALL_PERMISSION_KEYS
     else:
-        # Staff without a job_title get basic access
         db_user.permissions = ["view_dashboard", "view_bookings", "view_clients"]
 
-    # 7. Save to database
+    # 8. Save to database
     db.add(db_user)
     try:
         db.commit()
@@ -127,7 +169,7 @@ def create_user(
         
     db.refresh(db_user)
     
-    # 8. Send welcome email
+    # 9. Send welcome email
     send_welcome_email(
         to=db_user.email,
         full_name=db_user.full_name,
@@ -150,6 +192,8 @@ def list_users(
     if current_user.role == UserRole.super_admin:
         if tenant_id:
             query = query.filter(User.tenant_id == tenant_id)
+        else:
+            query = query.filter(User.tenant_id == current_user.tenant_id)
     else:
         query = query.filter(User.tenant_id == current_user.tenant_id)
         
@@ -185,17 +229,23 @@ def update_user(
     user = _get_user_or_404(user_id, db)
     update_data = user_update.model_dump(exclude_unset=True)
     
-    # ✅ Enforce admin-only updates for sensitive fields
+    # Enforce admin-only updates for sensitive fields
     sensitive_fields = {"role", "permissions", "department", "job_title", "is_active"}
     if sensitive_fields.intersection(update_data.keys()) and current_user.role not in [UserRole.super_admin, UserRole.tenant_admin]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update roles, permissions, or department assignments.")
-    
+        
     if "email" in update_data and update_data["email"] is not None:
         update_data["email"] = normalize_email(update_data["email"])
         
     _enforce_update_permission(current_user, user, update_data)
     
+    # HIGH PRECISION: Re-validate matrix if role, department, or title is being changed
     new_role = update_data.get("role", user.role)
+    new_department = update_data.get("department", user.department)
+    new_job_title = update_data.get("job_title", user.job_title)
+    
+    _validate_job_title_and_department(new_role, new_department, new_job_title)
+    
     new_tenant_id = update_data.get("tenant_id", user.tenant_id)
     _validate_tenant_for_role(db, new_role, new_tenant_id)
     
@@ -227,11 +277,12 @@ def suspend_user(
     user_id: int,
     reason: str | None = None,
     db: Session = Depends(get_db),
-    current_user: User = admin_or_above, # ✅ Only admins can suspend
+    current_user: User = admin_or_above, # Only admins can suspend
 ):
     user = _get_user_or_404(user_id, db)
     if current_user.id == user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot suspend yourself")
+        
     _enforce_staff_permission(current_user, user, "suspend")
     
     if user.is_suspended:
@@ -247,7 +298,7 @@ def suspend_user(
 def reactivate_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = admin_or_above, # ✅ Only admins can reactivate
+    current_user: User = admin_or_above, # Only admins can reactivate
 ):
     user = _get_user_or_404(user_id, db)
     _enforce_staff_permission(current_user, user, "reactivate")
@@ -265,11 +316,12 @@ def reactivate_user(
 def delete_user(
     user_id: int,
     db: Session = Depends(get_db),
-    current_user: User = admin_or_above, # ✅ Only admins can delete
+    current_user: User = admin_or_above, # Only admins can delete
 ):
     user = _get_user_or_404(user_id, db)
     if current_user.id == user_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot delete your own account")
+        
     _enforce_staff_permission(current_user, user, "delete")
     
     db.delete(user)

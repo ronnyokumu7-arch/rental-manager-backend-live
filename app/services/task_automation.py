@@ -25,12 +25,11 @@ class TaskAutomationService:
         
         for user in users_with_expiring_dl:
             days_left = (user.dl_expiry - today).days
-            
-            # Smart Router: Try to find HR/Manager, fallback to Unassigned Pool
+            # ✅ STRICT ROUTING: Looks for "HR"
             TaskAutomationService._smart_create_task(
                 db=db, 
                 tenant_id=user.tenant_id,
-                target_role="HR", # The system will look for this role
+                target_role="HR", 
                 title=f"Renew Driver's License ({user.full_name})",
                 description=f"Driver's license expires in {days_left} days ({user.dl_expiry.strftime('%Y-%m-%d')}).",
                 category="compliance", 
@@ -57,7 +56,7 @@ class TaskAutomationService:
             amount = getattr(invoice, 'total_amount', getattr(invoice, 'amount', 'N/A'))
             inv_number = getattr(invoice, 'invoice_number', getattr(invoice, 'id', 'Unknown'))
             
-            # Smart Router: Try to find Accountant/Credit Control
+            # ✅ STRICT ROUTING: Looks for "Accountant"
             TaskAutomationService._smart_create_task(
                 db=db, 
                 tenant_id=invoice.tenant_id,
@@ -87,6 +86,7 @@ class TaskAutomationService:
             # A. Service Due
             if next_service and hasattr(next_service, 'date'):
                 if next_service.date() >= today.date() and next_service.date() <= (today + timedelta(days=14)).date():
+                    # ✅ STRICT ROUTING: Looks for "Fleet Manager"
                     TaskAutomationService._smart_create_task(
                         db=db, 
                         tenant_id=vehicle.tenant_id,
@@ -104,6 +104,7 @@ class TaskAutomationService:
             if insurance_expiry and hasattr(insurance_expiry, 'date'):
                 if insurance_expiry.date() >= today.date() and insurance_expiry.date() <= (today + timedelta(days=30)).date():
                     days_left = (insurance_expiry.date() - today.date()).days
+                    # ✅ STRICT ROUTING: Looks for "Fleet Manager"
                     TaskAutomationService._smart_create_task(
                         db=db, 
                         tenant_id=vehicle.tenant_id,

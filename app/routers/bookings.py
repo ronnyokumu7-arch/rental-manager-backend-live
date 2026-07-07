@@ -1,4 +1,3 @@
-# backend/app/routers/bookings.py
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -21,6 +20,8 @@ from app.services.email import (
     send_booking_completed,
     send_booking_confirmed,
 )
+# ✅ IMPORT TASK AUTOMATION SERVICE
+from app.services.task_automation import TaskAutomationService
 
 router = APIRouter(prefix="/bookings", tags=["bookings"])
 
@@ -32,6 +33,69 @@ def _get_booking_or_404(booking_id: int, tenant_id: int, db: Session) -> Booking
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
     return booking
+
+# ---------------------------------------------------------------------------
+# TASK DISPATCHER HELPER (Keeps routes clean)
+# ---------------------------------------------------------------------------
+def dispatch_booking_tasks(booking: Booking, action: str, db: Session):
+    """Generates tasks based on booking lifecycle events using Smart Routing."""
+    tenant_id = booking.tenant_id
+    
+    if action == "confirmed":
+        TaskAutomationService._smart_create_task(
+            db=db, tenant_id=tenant_id, target_role="Contracts Officer",
+            title=f"Generate Rental Contract for #{booking.booking_number}",
+            description=f"Booking confirmed. Draft and send the rental contract to the client.",
+            category="booking", priority="high",
+            due_date=datetime.now(timezone.utc) + timedelta(hours=24),
+            target_type="booking", target_id=booking.id
+        )
+        TaskAutomationService._smart_create_task(
+            db=db, tenant_id=tenant_id, target_role="Cashier",
+            title=f"Collect Security Deposit for #{booking.booking_number}",
+            description=f"Booking confirmed. Ensure the security deposit is collected before vehicle handover.",
+            category="finance", priority="high",
+            due_date=datetime.now(timezone.utc) + timedelta(hours=24),
+            target_type="booking", target_id=booking.id
+        )
+
+    elif action == "activated":
+        TaskAutomationService._smart_create_task(
+            db=db, tenant_id=tenant_id, target_role="Dispatcher",
+            title=f"Log Starting Mileage & Handover for #{booking.booking_number}",
+            description=f"Vehicle handed over. Ensure starting mileage, fuel levels, and handover checklist are logged.",
+            category="fleet", priority="high",
+            due_date=datetime.now(timezone.utc) + timedelta(hours=12),
+            target_type="booking", target_id=booking.id
+        )
+
+    elif action == "completed":
+        TaskAutomationService._smart_create_task(
+            db=db, tenant_id=tenant_id, target_role="Fleet Manager",
+            title=f"Conduct Return Inspection for #{booking.booking_number}",
+            description=f"Booking completed. Inspect returned vehicle, log ending mileage, and check for damages.",
+            category="fleet", priority="high",
+            due_date=datetime.now(timezone.utc) + timedelta(hours=4),
+            target_type="booking", target_id=booking.id
+        )
+        TaskAutomationService._smart_create_task(
+            db=db, tenant_id=tenant_id, target_role="Accountant",
+            title=f"Generate Final Invoice for #{booking.booking_number}",
+            description=f"Return inspection done. Generate final invoice, process deposit refund, and check for extra charges.",
+            category="finance", priority="high",
+            due_date=datetime.now(timezone.utc) + timedelta(days=2),
+            target_type="booking", target_id=booking.id
+        )
+
+    elif action == "cancelled":
+        TaskAutomationService._smart_create_task(
+            db=db, tenant_id=tenant_id, target_role="Cashier",
+            title=f"Process Cancellation Fee for #{booking.booking_number}",
+            description=f"Booking cancelled. Process any applicable cancellation fees and release vehicle back to fleet.",
+            category="finance", priority="medium",
+            due_date=datetime.now(timezone.utc) + timedelta(hours=12),
+            target_type="booking", target_id=booking.id
+        )
 
 # ---------------------------------------------------------------------------
 # LIST BOOKINGS
@@ -105,19 +169,22 @@ def create_booking(
     now = datetime.now(timezone.utc)
     current_month = now.month
     current_year = now.year % 100
-    prefix = f"BK-%{current_month:02d}{current_year:02d}"
-
+    prefix = f"BK-{current_month:02d}{current_year:02d}"
+    
     last_booking = db.query(Booking.booking_number).filter(
-        Booking.booking_number.like(f"{prefix}%")
+        Booking.booking_number.like(f"{prefix}-%")
     ).order_by(Booking.booking_number.desc()).first()
-
+    
     if last_booking and last_booking[0]:
-        last_counter = int(last_booking[0].split("-")[1][:2])
-        new_counter = last_counter + 1
+        try:
+            last_counter = int(last_booking[0].split("-")[1][:2])
+            new_counter = last_counter + 1
+        except (ValueError, IndexError):
+            new_counter = 1
     else:
         new_counter = 1
         
-    new_booking_number = f"BK-{new_counter:02d}{current_month:02d}{current_year:02d}"
+    new_booking_number = f"{prefix}-{new_counter:02d}"
 
     db_booking = Booking(
         **booking.model_dump(),
@@ -125,7 +192,6 @@ def create_booking(
         status=BookingStatus.pending,
         booking_number=new_booking_number,
     )
-
     db.add(db_booking)
     db.commit()
     db.refresh(db_booking)
@@ -160,11 +226,8 @@ def generate_invoice(
 ):
     """Generate a draft invoice (acting as a quotation) to share with the client."""
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
-    
-    # 1. Create or fetch existing draft invoice
     invoice = create_invoice_for_booking(booking, db)
     
-    # 2. Ensure share token exists and is valid
     if not invoice.share_token or (invoice.share_token_expires_at and invoice.share_token_expires_at < datetime.now(timezone.utc)):
         invoice.share_token = str(uuid.uuid4())
         invoice.share_token_expires_at = datetime.now(timezone.utc) + timedelta(days=7)
@@ -179,7 +242,7 @@ def generate_invoice(
     }
 
 # ---------------------------------------------------------------------------
-# LIFECYCLE TRANSITIONS
+# LIFECYCLE TRANSITIONS (✅ TASK TRIGGERS INJECTED HERE)
 # ---------------------------------------------------------------------------
 @router.post("/{booking_id}/confirm", response_model=BookingOut)
 def confirm_booking(
@@ -190,14 +253,15 @@ def confirm_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.pending:
         raise HTTPException(400, "Only pending bookings can be confirmed.")
-    booking.status = BookingStatus.confirmed
 
-    # Generate Contract & Finalize Invoice if they don't exist
+    booking.status = BookingStatus.confirmed
     create_contract_for_booking(booking, db)
     create_invoice_for_booking(booking, db)
-
     db.commit()
     db.refresh(booking)
+
+    # ✅ TRIGGER TASKS
+    dispatch_booking_tasks(booking, "confirmed", db)
 
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
@@ -220,6 +284,7 @@ def activate_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.confirmed:
         raise HTTPException(400, "Only confirmed bookings can be activated.")
+
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     if client.status != ClientStatus.active:
         raise HTTPException(400, "Client must be active.")
@@ -232,6 +297,9 @@ def activate_booking(
     vehicle.status = VehicleStatus.rented
     db.commit()
     db.refresh(booking)
+
+    # ✅ TRIGGER TASKS
+    dispatch_booking_tasks(booking, "activated", db)
 
     if client.email:
         send_booking_activated(
@@ -252,13 +320,16 @@ def complete_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status != BookingStatus.active:
         raise HTTPException(400, "Only active bookings can be completed.")
+
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
     booking.status = BookingStatus.completed
     if vehicle:
         vehicle.status = VehicleStatus.available
-        
     db.commit()
     db.refresh(booking)
+
+    # ✅ TRIGGER TASKS
+    dispatch_booking_tasks(booking, "completed", db)
 
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     if client and client.email:
@@ -279,6 +350,7 @@ def cancel_booking(
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status in (BookingStatus.completed, BookingStatus.cancelled):
         raise HTTPException(400, f"Cannot cancel a {booking.status.value} booking")
+
     if booking.status == BookingStatus.active:
         vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
         if vehicle:
@@ -287,6 +359,9 @@ def cancel_booking(
     booking.status = BookingStatus.cancelled
     db.commit()
     db.refresh(booking)
+
+    # ✅ TRIGGER TASKS
+    dispatch_booking_tasks(booking, "cancelled", db)
 
     client = db.query(Client).filter(Client.id == booking.client_id).first()
     vehicle = db.query(Vehicle).filter(Vehicle.id == booking.vehicle_id).first()
