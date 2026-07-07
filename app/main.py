@@ -10,7 +10,7 @@ from app.routers import (
     admin, auth, bookings, clients, contracts,
     invoices, payments, reports, subscriptions,
     tenant_policies, tenant_profile, tenants,
-    users, vehicles, activity_logs, role_templates,
+    users, vehicles, activity_logs, role_templates, tasks, # ✅ ADDED tasks
 )
 from app.scripts.seed_superadmin import update_password
 
@@ -86,7 +86,7 @@ routers = [
     auth, tenants, users, clients, vehicles,
     bookings, subscriptions, invoices, payments,
     tenant_profile, tenant_policies, role_templates, contracts,
-    admin, reports, activity_logs
+    admin, reports, activity_logs, tasks # ✅ ADDED tasks
 ]
 
 for router in routers:

@@ -12,6 +12,7 @@ from app.models.users import User
 from app.models.vehicles import Vehicle
 from app.models.activity_log import ActivityLog
 from app.models.role_template import RoleTemplate
+from app.models.task import Task # ✅ NEW
 
 __all__ = [
     "Booking",
@@ -25,6 +26,7 @@ __all__ = [
     "TenantProfile",
     "Tenant",
     "User",
+    "Task",
     "Vehicle",
     "ActivityLog",
     "RoleTemplate", # ✅ NEW
