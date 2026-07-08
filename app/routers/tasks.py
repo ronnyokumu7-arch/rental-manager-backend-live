@@ -12,10 +12,11 @@ from app.schemas.task import TaskCreate, TaskOut, TaskUpdate
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
+# The Bouncers: Only admins can manage the unassigned pool
 admin_or_above = Depends(require_role([UserRole.super_admin, UserRole.tenant_admin]))
 
 # ---------------------------------------------------------------------------
-# 1. PERSONAL TASKS (Self View)
+# 1. PERSONAL TASKS
 # ---------------------------------------------------------------------------
 @router.get("/my-tasks", response_model=List[TaskOut])
 def get_my_tasks(
@@ -30,21 +31,16 @@ def get_my_tasks(
         Task.user_id == current_user.id,
         Task.is_archived == False
     )
-    if status: query = query.filter(Task.status == status)
-    if category: query = query.filter(Task.category == category)
-    
-    tasks = query.order_by(Task.due_date.asc(), Task.priority.desc()).limit(limit).all()
-    
-    # Auto-promote upcoming tasks to pending if due date has passed
-    now = datetime.now()
-    for task in tasks:
-        if task.status == TaskStatus.upcoming and task.due_date and task.due_date <= now:
-            task.status = TaskStatus.pending
-    db.commit()
-    return tasks
+    if status: 
+        query = query.filter(Task.status == status)
+    if category: 
+        query = query.filter(Task.category == category)
+        
+    # ✅ FIX: Removed the loop that tried to promote 'upcoming' to 'pending'
+    return query.order_by(Task.due_date.asc(), Task.priority.desc()).limit(limit).all()
 
 # ---------------------------------------------------------------------------
-# 2. ADMIN: VIEW SPECIFIC USER'S TASKS (Fixes the "Wrong User" Bug)
+# 2. ADMIN: VIEW SPECIFIC USER'S TASKS
 # ---------------------------------------------------------------------------
 @router.get("/user/{user_id}", response_model=List[TaskOut])
 def get_user_tasks(
@@ -94,7 +90,7 @@ def claim_task(
         raise HTTPException(status_code=404, detail="Task not found or already claimed")
     
     task.user_id = current_user.id
-    task.status = TaskStatus.pending # ✅ Immediately set to pending upon claim
+    task.status = TaskStatus.pending # ✅ Already correct
     db.commit()
     db.refresh(task)
     return task
@@ -125,7 +121,7 @@ def assign_task(
         raise HTTPException(status_code=404, detail="Target user not found in your agency")
         
     task.user_id = target_user.id
-    task.status = TaskStatus.pending # ✅ FIX: Set to pending immediately so it shows up
+    task.status = TaskStatus.pending # ✅ FIX: Changed from 'upcoming' to 'pending'
     task.requires_role = None
     db.commit()
     db.refresh(task)
@@ -166,11 +162,14 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Only admins can create tasks for other users
     if task.user_id and task.user_id != current_user.id and current_user.role not in ["tenant_admin", "super_admin"]:
         raise HTTPException(status_code=403, detail="Only admins can assign tasks to others")
         
+    # Exclude fields that we are going to override manually
     task_data = task.model_dump(exclude={"is_system_generated", "created_by"})
     
+    # SECURITY: Auto-assign tenant_id from the current user's token
     db_task = Task(
         **task_data,
         tenant_id=current_user.tenant_id,
