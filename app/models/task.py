@@ -9,6 +9,7 @@ class TaskStatus(str, enum.Enum):
     unassigned = "unassigned"
     pending = "pending"
     completed = "completed"
+    # ✅ 'upcoming' is completely removed to match your SQL update
 
 class TaskPriority(str, enum.Enum):
     low = "low"
@@ -17,7 +18,10 @@ class TaskPriority(str, enum.Enum):
     urgent = "urgent"
 
 class Task(Base):
+    # ✅ CRITICAL FIX: Added the double underscores!
     __tablename__ = "tasks"
+    
+    id = Column(Integer, primary_key=True, index=True)
     
     # SECURITY & ISOLATION
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
@@ -54,7 +58,7 @@ class Task(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     
-    # RELATIONSHIPS (Fixed multiple foreign keys error)
+    # RELATIONSHIPS
     tenant = relationship("Tenant", backref="tasks")
     user = relationship("User", foreign_keys=[user_id], backref="assigned_tasks")
     creator = relationship("User", foreign_keys=[created_by])
