@@ -13,7 +13,7 @@ class VehicleBase(BaseModel):
     daily_rate: Decimal
     current_mileage: int = 0
     next_service_km: Optional[int] = None
-    insurance_number: Optional[str] = None # ✅ ADDED
+    insurance_number: Optional[str] = None
     insurance_expiry: Optional[datetime] = None
     notes: Optional[str] = None
 
@@ -30,7 +30,7 @@ class VehicleUpdate(BaseModel):
     status: Optional[VehicleStatus] = None
     current_mileage: Optional[int] = None
     next_service_km: Optional[int] = None
-    insurance_number: Optional[str] = None # ✅ ADDED
+    insurance_number: Optional[str] = None
     insurance_expiry: Optional[datetime] = None
     insurance_doc: Optional[str] = None
     registration_doc: Optional[str] = None

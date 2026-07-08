@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
@@ -13,16 +12,13 @@ from app.services.task_automation import TaskAutomationService
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
 
-# ---------------------------------------------------------------------------
-# ✅ TASK DISPATCHER HELPER (Fleet Operations Engine)
-# ---------------------------------------------------------------------------
 def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
-    """Generates tasks based on vehicle lifecycle events using Smart Routing."""
+    """Generates tasks based on vehicle lifecycle events."""
     tenant_id = vehicle.tenant_id
     plate = vehicle.plate_number
     now = datetime.now(timezone.utc)
     
-    if action == "created": # Now means "Pending Activation"
+    if action == "created":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Fleet Manager",
             title=f"Verify Documents & Inspect {plate}",
@@ -31,7 +27,7 @@ def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
             due_date=now + timedelta(hours=24),
             target_type="vehicle", target_id=vehicle.id
         )
-    elif action == "activated": # Transitioned to Available
+    elif action == "activated":
         TaskAutomationService._smart_create_task(
             db=db, tenant_id=tenant_id, target_role="Dispatcher",
             title=f"Conduct Pre-Rental Safety Check for {plate}",
@@ -68,64 +64,48 @@ def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
             target_type="vehicle", target_id=vehicle.id
         )
 
-# ---------------------------------------------------------------------------
-# Business Logic Helpers
-# ---------------------------------------------------------------------------
 def _get_authorized_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
-    """Retrieve a vehicle and enforce tenant ownership."""
     vehicle = db.query(Vehicle).filter(
         Vehicle.id == vehicle_id,
         Vehicle.tenant_id == user.tenant_id
     ).first()
     if not vehicle:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Vehicle not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
     return vehicle
 
-# ---------------------------------------------------------------------------
-# Routes
-# ---------------------------------------------------------------------------
 @router.post("/", response_model=VehicleOut, status_code=status.HTTP_201_CREATED)
 def create_vehicle(
     vehicle: VehicleCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    # ✅ FORCE STATUS: All new cars start in pending_activation
     data = vehicle.model_dump()
-    data["status"] = VehicleStatus.pending_activation 
+    data["status"] = VehicleStatus.pending_activation
     
     db_vehicle = Vehicle(**data, tenant_id=current_user.tenant_id)
     db.add(db_vehicle)
     db.commit()
     db.refresh(db_vehicle)
     
-    # ✅ TRIGGER: Vehicle Created (Pending Activation)
     _dispatch_vehicle_tasks(db_vehicle, "created", db)
-    db.commit() # ✅ CRITICAL: Commit the tasks
+    # db.commit() is now inside _smart_create_task
     
     return db_vehicle
 
-# ✅ NEW: ACTIVATION ENDPOINT (The Compliance Gate)
 @router.post("/{vehicle_id}/activate", response_model=VehicleOut)
 def activate_vehicle(
     vehicle_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    """Transitions a vehicle from pending_activation to available. Enforces compliance."""
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     
     if vehicle.status != VehicleStatus.pending_activation:
         raise HTTPException(400, "Only vehicles pending activation can be activated.")
     
-    # ✅ COMPLIANCE CHECK: Must have insurance details
     if not vehicle.insurance_number or not vehicle.insurance_expiry:
         raise HTTPException(400, "Insurance policy number and expiry date are required before activation.")
         
-    # ✅ BACKDATING PREVENTION: Insurance must be in the future
     if vehicle.insurance_expiry <= datetime.now(timezone.utc):
         raise HTTPException(400, "Insurance is already expired. Cannot activate vehicle.")
         
@@ -133,9 +113,7 @@ def activate_vehicle(
     db.commit()
     db.refresh(vehicle)
     
-    # ✅ TRIGGER: Vehicle Activated
     _dispatch_vehicle_tasks(vehicle, "activated", db)
-    db.commit() # ✅ CRITICAL: Commit the tasks
     
     return vehicle
 
@@ -149,7 +127,6 @@ def update_vehicle(
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     update_data = updates.model_dump(exclude_unset=True)
     
-    # ✅ BACKDATING PREVENTION: Protect active vehicles from insurance rollback
     if "insurance_expiry" in update_data and vehicle.status != VehicleStatus.pending_activation:
         new_expiry = update_data["insurance_expiry"]
         if vehicle.insurance_expiry and new_expiry < vehicle.insurance_expiry:
@@ -200,19 +177,17 @@ def send_to_maintenance(
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     if vehicle.status == VehicleStatus.retired:
-        raise HTTPException(status_code=400, detail="Retired vehicles cannot be sent to maintenance")
+        raise HTTPException(400, "Retired vehicles cannot be sent to maintenance")
     if vehicle.status == VehicleStatus.rented:
-        raise HTTPException(status_code=400, detail="Vehicle is currently rented. Complete or cancel the active booking first")
+        raise HTTPException(400, "Vehicle is currently rented")
     if vehicle.status == VehicleStatus.maintenance:
-        raise HTTPException(status_code=400, detail="Vehicle is already in maintenance")
+        raise HTTPException(400, "Vehicle is already in maintenance")
         
     vehicle.status = VehicleStatus.maintenance
     db.commit()
     db.refresh(vehicle)
     
-    # ✅ TRIGGER
     _dispatch_vehicle_tasks(vehicle, "maintenance", db)
-    db.commit()
     return vehicle
 
 @router.post("/{vehicle_id}/reactivate", response_model=VehicleOut)
@@ -223,17 +198,15 @@ def reactivate_vehicle(
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     if vehicle.status == VehicleStatus.retired:
-        raise HTTPException(status_code=400, detail="Retired vehicles cannot be reactivated")
+        raise HTTPException(400, "Retired vehicles cannot be reactivated")
     if vehicle.status == VehicleStatus.available:
-        raise HTTPException(status_code=400, detail="Vehicle is already available")
+        raise HTTPException(400, "Vehicle is already available")
         
     vehicle.status = VehicleStatus.available
     db.commit()
     db.refresh(vehicle)
     
-    # ✅ TRIGGER
     _dispatch_vehicle_tasks(vehicle, "reactivate", db)
-    db.commit()
     return vehicle
 
 @router.post("/{vehicle_id}/retire", response_model=VehicleOut)
@@ -244,17 +217,15 @@ def retire_vehicle(
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     if vehicle.status == VehicleStatus.rented:
-        raise HTTPException(status_code=400, detail="Vehicle is currently rented. Complete or cancel the active booking first")
+        raise HTTPException(400, "Vehicle is currently rented")
     if vehicle.status == VehicleStatus.retired:
-        raise HTTPException(status_code=400, detail="Vehicle is already retired")
+        raise HTTPException(400, "Vehicle is already retired")
         
     vehicle.status = VehicleStatus.retired
     db.commit()
     db.refresh(vehicle)
     
-    # ✅ TRIGGER
     _dispatch_vehicle_tasks(vehicle, "retire", db)
-    db.commit()
     return vehicle
 
 @router.post("/{vehicle_id}/archive", response_model=VehicleOut)
@@ -265,9 +236,9 @@ def archive_vehicle(
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     if vehicle.status == VehicleStatus.rented:
-        raise HTTPException(status_code=400, detail="Vehicle is currently rented and cannot be archived")
+        raise HTTPException(400, "Vehicle is currently rented")
     if vehicle.is_archived:
-        raise HTTPException(status_code=400, detail="Vehicle is already archived")
+        raise HTTPException(400, "Vehicle is already archived")
         
     vehicle.is_archived = True
     vehicle.archived_at = datetime.now(timezone.utc)
@@ -283,7 +254,7 @@ def restore_vehicle(
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     if not vehicle.is_archived:
-        raise HTTPException(status_code=400, detail="Vehicle is not archived")
+        raise HTTPException(400, "Vehicle is not archived")
         
     vehicle.is_archived = False
     vehicle.archived_at = None
@@ -299,6 +270,6 @@ def delete_vehicle(
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
     if vehicle.status == VehicleStatus.rented:
-        raise HTTPException(status_code=400, detail="Vehicle is currently rented and cannot be deleted")
+        raise HTTPException(400, "Vehicle is currently rented")
     db.delete(vehicle)
     db.commit()
