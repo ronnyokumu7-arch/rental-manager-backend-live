@@ -52,38 +52,65 @@ class TaskAutomationService:
                 target_type="invoice", target_id=invoice.id
             )
         
-        # 3. Vehicle Maintenance & Insurance
-        vehicles = db.query(Vehicle).filter(
-            Vehicle.status != "retired",
-            Vehicle.tenant_id != None
-        ).all()
-        
-        for vehicle in vehicles:
-            plate = vehicle.plate_number
-            # Service Due
-            if vehicle.next_service_km and vehicle.current_mileage >= vehicle.next_service_km:
-                TaskAutomationService._smart_create_task(
-                    db=db, tenant_id=vehicle.tenant_id, target_role="Fleet Manager",
-                    title=f"Schedule Service for {plate}",
-                    description=f"Vehicle has {vehicle.current_mileage}km. Next service due at {vehicle.next_service_km}km.",
-                    category="fleet", priority=TaskPriority.high,
-                    due_date=today + timedelta(days=1),
-                    target_type="vehicle", target_id=vehicle.id
-                )
-            # Insurance Expiring
-            if vehicle.insurance_expiry:
-                days_left = (vehicle.insurance_expiry.date() - today.date()).days if hasattr(vehicle.insurance_expiry, 'date') else (vehicle.insurance_expiry - today).days
-                if 0 <= days_left <= 30:
-                    TaskAutomationService._smart_create_task(
-                        db=db, tenant_id=vehicle.tenant_id, target_role="Fleet Manager",
-                        title=f"Renew Insurance for {plate}",
-                        description=f"Vehicle insurance expires in {days_left} days.",
-                        category="compliance", 
-                        priority=TaskPriority.high if days_left < 7 else TaskPriority.medium,
-                        due_date=vehicle.insurance_expiry - timedelta(days=7),
-                        target_type="vehicle", target_id=vehicle.id
-                    )
-        
+        # ---------------------------------------------------------
+# 3. Vehicle Maintenance & Insurance (Fleet Tasks)
+# ---------------------------------------------------------
+vehicles = db.query(Vehicle).filter(
+    Vehicle.status != VehicleStatus.retired,
+    Vehicle.tenant_id != None
+).all()
+
+for vehicle in vehicles:
+    plate = vehicle.plate_number
+    
+    # A. Mileage-Based Service Due
+    if vehicle.next_service_km and vehicle.current_mileage >= vehicle.next_service_km:
+        km_overdue = vehicle.current_mileage - vehicle.next_service_km
+        TaskAutomationService._smart_create_task(
+            db=db, 
+            tenant_id=vehicle.tenant_id,
+            target_role="Fleet Manager",
+            title=f"URGENT: Service Overdue for {plate}",
+            description=f"Vehicle has {vehicle.current_mileage:,}km. Service was due at {vehicle.next_service_km:,}km ({km_overdue:,}km overdue).",
+            category="fleet", 
+            priority=TaskPriority.high,
+            due_date=today + timedelta(days=1),
+            target_type="vehicle", 
+            target_id=vehicle.id
+        )
+    elif vehicle.next_service_km:
+        # Warning: Service due soon (within 1000km)
+        km_until_service = vehicle.next_service_km - vehicle.current_mileage
+        if 0 < km_until_service <= 1000:
+            TaskAutomationService._smart_create_task(
+                db=db, 
+                tenant_id=vehicle.tenant_id,
+                target_role="Fleet Manager",
+                title=f"Service Due Soon for {plate}",
+                description=f"Vehicle has {vehicle.current_mileage:,}km. Next service due at {vehicle.next_service_km:,}km ({km_until_service:,}km remaining).",
+                category="fleet", 
+                priority=TaskPriority.medium,
+                due_date=today + timedelta(days=7),
+                target_type="vehicle", 
+                target_id=vehicle.id
+            )
+    
+    # B. Insurance Expiring
+    if vehicle.insurance_expiry:
+        days_left = (vehicle.insurance_expiry.date() - today.date()).days if hasattr(vehicle.insurance_expiry, 'date') else (vehicle.insurance_expiry - today).days
+        if 0 <= days_left <= 30:
+            TaskAutomationService._smart_create_task(
+                db=db, 
+                tenant_id=vehicle.tenant_id,
+                target_role="Fleet Manager",
+                title=f"Renew Insurance for {plate}",
+                description=f"Vehicle insurance expires in {days_left} days ({vehicle.insurance_expiry.strftime('%Y-%m-%d')}).",
+                category="compliance", 
+                priority=TaskPriority.high if days_left < 7 else TaskPriority.medium,
+                due_date=vehicle.insurance_expiry - timedelta(days=7),
+                target_type="vehicle", 
+                target_id=vehicle.id
+            )        
         db.commit()
     
     @staticmethod
