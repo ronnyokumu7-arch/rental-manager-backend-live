@@ -1,68 +1,17 @@
-from datetime import datetime, timedelta, timezone
+# app/routers/vehicles.py
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
 from app.models.users import User
 from app.models.vehicles import Vehicle, VehicleStatus
-from app.models.task import TaskPriority
 from app.schemas.vehicle import VehicleCreate, VehicleOut, VehicleUpdate
-from app.services.task_automation import TaskAutomationService
+from app.services.vehicle_tasks import VehicleTaskService
 
 router = APIRouter(prefix="/vehicles", tags=["vehicles"])
-
-def _dispatch_vehicle_tasks(vehicle: Vehicle, action: str, db: Session):
-    """Generates tasks based on vehicle lifecycle events."""
-    tenant_id = vehicle.tenant_id
-    plate = vehicle.plate_number
-    now = datetime.now(timezone.utc)
-    
-    if action == "created":
-        TaskAutomationService._smart_create_task(
-            db=db, tenant_id=tenant_id, target_role="Fleet Manager",
-            title=f"Verify Documents & Inspect {plate}",
-            description=f"New vehicle added. Verify VIN, upload registration/insurance, and conduct physical inspection.",
-            category="fleet", priority=TaskPriority.high,
-            due_date=now + timedelta(hours=24),
-            target_type="vehicle", target_id=vehicle.id
-        )
-    elif action == "activated":
-        TaskAutomationService._smart_create_task(
-            db=db, tenant_id=tenant_id, target_role="Dispatcher",
-            title=f"Conduct Pre-Rental Safety Check for {plate}",
-            description=f"Vehicle is now live. Ensure it is cleaned, fueled, and ready for handover.",
-            category="fleet", priority=TaskPriority.medium,
-            due_date=now + timedelta(hours=12),
-            target_type="vehicle", target_id=vehicle.id
-        )
-    elif action == "maintenance":
-        TaskAutomationService._smart_create_task(
-            db=db, tenant_id=tenant_id, target_role="Fleet Manager",
-            title=f"Track Maintenance Progress for {plate}",
-            description=f"Vehicle sent to maintenance. Track service progress and update logs upon return.",
-            category="fleet", priority=TaskPriority.medium,
-            due_date=now + timedelta(days=3),
-            target_type="vehicle", target_id=vehicle.id
-        )
-    elif action == "reactivate":
-        TaskAutomationService._smart_create_task(
-            db=db, tenant_id=tenant_id, target_role="Fleet Manager",
-            title=f"Post-Maintenance Check for {plate}",
-            description=f"Vehicle reactivated. Log ending mileage and conduct post-service safety check.",
-            category="fleet", priority=TaskPriority.high,
-            due_date=now + timedelta(hours=12),
-            target_type="vehicle", target_id=vehicle.id
-        )
-    elif action == "retire":
-        TaskAutomationService._smart_create_task(
-            db=db, tenant_id=tenant_id, target_role="Manager",
-            title=f"Process Retirement Paperwork for {plate}",
-            description=f"Vehicle retired. Update asset register, remove from insurance, and process final paperwork.",
-            category="fleet", priority=TaskPriority.medium,
-            due_date=now + timedelta(days=7),
-            target_type="vehicle", target_id=vehicle.id
-        )
 
 def _get_authorized_vehicle(vehicle_id: int, user: User, db: Session) -> Vehicle:
     vehicle = db.query(Vehicle).filter(
@@ -87,8 +36,11 @@ def create_vehicle(
     db.commit()
     db.refresh(db_vehicle)
     
-    _dispatch_vehicle_tasks(db_vehicle, "created", db)
-    # db.commit() is now inside _smart_create_task
+    # ✅ NEW: Check for missing critical data (Plan A/B routing)
+    VehicleTaskService.check_completeness(db, db_vehicle, db_vehicle.tenant_id)
+    
+    # ✅ NEW: Dispatch standard lifecycle task
+    VehicleTaskService.dispatch_lifecycle_tasks(db, db_vehicle, "created")
     
     return db_vehicle
 
@@ -102,10 +54,8 @@ def activate_vehicle(
     
     if vehicle.status != VehicleStatus.pending_activation:
         raise HTTPException(400, "Only vehicles pending activation can be activated.")
-    
     if not vehicle.insurance_number or not vehicle.insurance_expiry:
         raise HTTPException(400, "Insurance policy number and expiry date are required before activation.")
-        
     if vehicle.insurance_expiry <= datetime.now(timezone.utc):
         raise HTTPException(400, "Insurance is already expired. Cannot activate vehicle.")
         
@@ -113,8 +63,7 @@ def activate_vehicle(
     db.commit()
     db.refresh(vehicle)
     
-    _dispatch_vehicle_tasks(vehicle, "activated", db)
-    
+    VehicleTaskService.dispatch_lifecycle_tasks(db, vehicle, "activated")
     return vehicle
 
 @router.patch("/{vehicle_id}", response_model=VehicleOut)
@@ -139,6 +88,11 @@ def update_vehicle(
         
     db.commit()
     db.refresh(vehicle)
+    
+    # ✅ NEW EVENT TRIGGER: If mileage was manually updated, check maintenance rules
+    if "current_mileage" in update_data:
+        VehicleTaskService.check_maintenance_on_booking(db, vehicle, vehicle.tenant_id)
+        
     return vehicle
 
 @router.get("/", response_model=list[VehicleOut])
@@ -176,6 +130,7 @@ def send_to_maintenance(
     current_user: User = Depends(require_active_subscription),
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
+    
     if vehicle.status == VehicleStatus.retired:
         raise HTTPException(400, "Retired vehicles cannot be sent to maintenance")
     if vehicle.status == VehicleStatus.rented:
@@ -187,7 +142,11 @@ def send_to_maintenance(
     db.commit()
     db.refresh(vehicle)
     
-    _dispatch_vehicle_tasks(vehicle, "maintenance", db)
+    VehicleTaskService.dispatch_lifecycle_tasks(db, vehicle, "maintenance")
+    
+    # ✅ NEW EVENT TRIGGER: Check insurance status when vehicle enters maintenance
+    VehicleTaskService.check_insurance_on_maintenance_status(db, vehicle, vehicle.tenant_id)
+    
     return vehicle
 
 @router.post("/{vehicle_id}/reactivate", response_model=VehicleOut)
@@ -197,6 +156,7 @@ def reactivate_vehicle(
     current_user: User = Depends(require_active_subscription),
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
+    
     if vehicle.status == VehicleStatus.retired:
         raise HTTPException(400, "Retired vehicles cannot be reactivated")
     if vehicle.status == VehicleStatus.available:
@@ -206,7 +166,7 @@ def reactivate_vehicle(
     db.commit()
     db.refresh(vehicle)
     
-    _dispatch_vehicle_tasks(vehicle, "reactivate", db)
+    VehicleTaskService.dispatch_lifecycle_tasks(db, vehicle, "reactivate")
     return vehicle
 
 @router.post("/{vehicle_id}/retire", response_model=VehicleOut)
@@ -216,6 +176,7 @@ def retire_vehicle(
     current_user: User = Depends(require_active_subscription),
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
+    
     if vehicle.status == VehicleStatus.rented:
         raise HTTPException(400, "Vehicle is currently rented")
     if vehicle.status == VehicleStatus.retired:
@@ -225,7 +186,7 @@ def retire_vehicle(
     db.commit()
     db.refresh(vehicle)
     
-    _dispatch_vehicle_tasks(vehicle, "retire", db)
+    VehicleTaskService.dispatch_lifecycle_tasks(db, vehicle, "retire")
     return vehicle
 
 @router.post("/{vehicle_id}/archive", response_model=VehicleOut)
@@ -235,6 +196,7 @@ def archive_vehicle(
     current_user: User = Depends(require_active_subscription),
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
+    
     if vehicle.status == VehicleStatus.rented:
         raise HTTPException(400, "Vehicle is currently rented")
     if vehicle.is_archived:
@@ -253,6 +215,7 @@ def restore_vehicle(
     current_user: User = Depends(require_active_subscription),
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
+    
     if not vehicle.is_archived:
         raise HTTPException(400, "Vehicle is not archived")
         
@@ -269,7 +232,9 @@ def delete_vehicle(
     current_user: User = Depends(require_active_subscription),
 ):
     vehicle = _get_authorized_vehicle(vehicle_id, current_user, db)
+    
     if vehicle.status == VehicleStatus.rented:
         raise HTTPException(400, "Vehicle is currently rented")
+        
     db.delete(vehicle)
     db.commit()
