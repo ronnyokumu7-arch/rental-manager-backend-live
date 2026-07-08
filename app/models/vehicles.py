@@ -5,7 +5,7 @@ from sqlalchemy.sql import func
 from app.db.database import Base
 
 class VehicleStatus(str, enum.Enum):
-    pending_activation = "pending_activation" # ✅ CRITICAL FIX
+    pending_activation = "pending_activation" # ✅ CRITICAL FIX: Added missing status
     available = "available"
     rented = "rented"
     maintenance = "maintenance"
@@ -34,7 +34,7 @@ class Vehicle(Base):
     current_mileage = Column(Integer, nullable=False, default=0, server_default="0")
     next_service_km = Column(Integer, nullable=True)
     
-    # ✅ NEW: Insurance Fields
+    # ✅ CRITICAL FIX: Added missing insurance fields
     insurance_number = Column(String, nullable=True) 
     insurance_expiry = Column(DateTime(timezone=True), nullable=True)
     insurance_doc = Column(String, nullable=True)
