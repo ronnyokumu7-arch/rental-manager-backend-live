@@ -1,3 +1,4 @@
+# backend/app/schemas/contract.py
 from datetime import datetime
 from typing import Optional
 from pydantic import BaseModel
@@ -10,7 +11,7 @@ class ContractOut(BaseModel):
     contract_number: str
     status: ContractStatus
     pdf_path: Optional[str] = None
-    signature_image_path: Optional[str] = None
+    signature_image_path: Optional[str] = None # ✅ Make sure this is here too
     signed_at: Optional[datetime] = None
     share_token: Optional[str] = None
     share_token_expires_at: Optional[datetime] = None
@@ -18,7 +19,6 @@ class ContractOut(BaseModel):
     client_signed_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-
     model_config = {"from_attributes": True}
 
 class PublicContractView(BaseModel):
@@ -37,3 +37,7 @@ class PublicContractView(BaseModel):
     status: ContractStatus
     signed_by_client: bool
     created_at: datetime
+
+# ✅ ADD THIS MISSING CLASS
+class ContractSignPayload(BaseModel):
+    signature: str  # Base64 encoded signature image
