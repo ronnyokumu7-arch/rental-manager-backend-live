@@ -1,4 +1,3 @@
-# backend/app/routers/invoices.py
 import os
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -72,21 +71,27 @@ def create_invoice(
     ).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found or access denied")
-    
-    # Create the invoice using the service
-    invoice = create_invoice_for_booking(booking, db)
-    
+
+    # ✅ Pass custom amount and currency to the service
+    invoice = create_invoice_for_booking(
+        booking, 
+        db, 
+        custom_amount=payload.amount_due, 
+        custom_currency=payload.currency_code
+    )
+
     # If manual notes were provided, update the invoice
     if payload.notes:
         invoice.notes = payload.notes
+        # ✅ If a custom due date was provided in the payload, override the booking end date
+        if payload.due_date:
+            invoice.due_date = payload.due_date
         db.commit()
         db.refresh(invoice)
-        
+
     return invoice
 
-# ---------------------------------------------------------------------------
-# UPDATE INVOICE
-# ---------------------------------------------------------------------------
+# ✅ UPDATED: UPDATE INVOICE
 @router.patch("/{invoice_id}", response_model=InvoiceOut)
 def update_invoice(
     invoice_id: int,
@@ -100,11 +105,15 @@ def update_invoice(
     ).first()
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
-        
+
+    # Prevent updating amount if already paid
+    if invoice.status == InvoiceStatus.paid and updates.amount_due is not None:
+        raise HTTPException(status_code=400, detail="Cannot modify amount of a paid invoice")
+
     update_data = updates.model_dump(exclude_unset=True)
     for field, value in update_data.items():
         setattr(invoice, field, value)
-
+        
     db.commit()
     db.refresh(invoice)
     return invoice

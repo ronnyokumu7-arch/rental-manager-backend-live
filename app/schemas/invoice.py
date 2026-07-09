@@ -1,18 +1,22 @@
-# backend/app/schemas/invoice.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from app.models.invoices import InvoiceStatus
 
 class InvoiceCreate(BaseModel):
     booking_id: int
     due_date: datetime
     notes: Optional[str] = None
+    amount_due: Optional[Decimal] = None
+    currency_code: Optional[str] = "KES"
 
 class InvoiceUpdate(BaseModel):
     notes: Optional[str] = None
     status: Optional[InvoiceStatus] = None
+    amount_due: Optional[Decimal] = None
+    due_date: Optional[datetime] = None
+    currency_code: Optional[str] = None
 
 class InvoiceOut(BaseModel):
     id: int
@@ -31,5 +35,4 @@ class InvoiceOut(BaseModel):
     share_token_expires_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-
     model_config = {"from_attributes": True}
