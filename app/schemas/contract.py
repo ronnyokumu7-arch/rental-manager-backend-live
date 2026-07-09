@@ -10,6 +10,7 @@ class ContractOut(BaseModel):
     contract_number: str
     status: ContractStatus
     pdf_path: Optional[str] = None
+    signature_image_path: Optional[str] = None
     signed_at: Optional[datetime] = None
     share_token: Optional[str] = None
     share_token_expires_at: Optional[datetime] = None

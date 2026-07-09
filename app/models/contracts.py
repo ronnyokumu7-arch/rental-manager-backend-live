@@ -18,6 +18,7 @@ class Contract(Base):
     tenant_id = Column(Integer, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     
     contract_number = Column(String, unique=True, nullable=False)
+    signature_image_path = Column(String(500), nullable=True) # Add this line
     
     status = Column(
         Enum(ContractStatus),

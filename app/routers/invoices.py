@@ -18,7 +18,7 @@ from app.models.payments import Payment, PaymentStatus
 from app.schemas.invoice import InvoiceCreate, InvoiceOut, InvoiceUpdate
 from app.schemas.payment import PublicPaymentCreate
 from app.services.invoices import create_invoice_for_booking
-from app.services.pdf import generate_invoice_pdf
+from app.services.invoice_pdf import generate_invoice_pdf
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -72,7 +72,7 @@ def create_invoice(
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found or access denied")
 
-    # ✅ Pass custom amount and currency to the service
+
     invoice = create_invoice_for_booking(
         booking, 
         db, 
@@ -80,10 +80,10 @@ def create_invoice(
         custom_currency=payload.currency_code
     )
 
-    # If manual notes were provided, update the invoice
+
     if payload.notes:
         invoice.notes = payload.notes
-        # ✅ If a custom due date was provided in the payload, override the booking end date
+
         if payload.due_date:
             invoice.due_date = payload.due_date
         db.commit()
@@ -91,7 +91,7 @@ def create_invoice(
 
     return invoice
 
-# ✅ UPDATED: UPDATE INVOICE
+
 @router.patch("/{invoice_id}", response_model=InvoiceOut)
 def update_invoice(
     invoice_id: int,
@@ -106,7 +106,7 @@ def update_invoice(
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
 
-    # Prevent updating amount if already paid
+
     if invoice.status == InvoiceStatus.paid and updates.amount_due is not None:
         raise HTTPException(status_code=400, detail="Cannot modify amount of a paid invoice")
 

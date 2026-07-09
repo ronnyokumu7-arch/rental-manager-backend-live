@@ -1,3 +1,4 @@
+import base64
 import os
 from datetime import datetime, timedelta, timezone
 import uuid
@@ -15,8 +16,9 @@ from app.models.users import User
 from app.models.vehicles import Vehicle
 from app.schemas.contract import ContractOut, PublicContractView
 from app.services.contracts import create_contract_for_booking
-from app.services.pdf import generate_contract_pdf
+from app.services.contract_pdf import generate_contract_pdf
 from app.services.email import send_contract_to_client
+from app.schemas.contract import ContractSignPayload
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
@@ -250,6 +252,7 @@ def download_contract_pdf_public(
 @router.post("/public/{token}/sign", response_model=dict)
 def sign_contract_public(
     token: str,
+    payload: ContractSignPayload,
     db: Session = Depends(get_db),
 ):
     contract = db.query(Contract).filter(Contract.share_token == token).first()
@@ -266,14 +269,42 @@ def sign_contract_public(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Contract already signed")
 
     now = datetime.now(timezone.utc)
+    
+    # ✅ NEW: Process and save the signature image
+    if payload.signature:
+        try:
+            # Strip the data URI prefix if present (e.g., "data:image/png;base64,")
+            signature_data = payload.signature.split(",")[1] if "," in payload.signature else payload.signature
+            image_bytes = base64.b64decode(signature_data)
+            
+            # Define storage path
+            signature_dir = "storage/signatures"
+            os.makedirs(signature_dir, exist_ok=True)
+            
+            # Create a unique filename
+            filename = f"sig_{contract.id}_{int(now.timestamp())}.png"
+            filepath = os.path.join(signature_dir, filename)
+            
+            # Save the file
+            with open(filepath, "wb") as f:
+                f.write(image_bytes)
+                
+            # Link the path to the contract model
+            contract.signature_image_path = filepath
+            
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to process signature: {str(e)}")
+
+    # Update contract status
     contract.signed_by_client = True
     contract.client_signed_at = now
     contract.status = ContractStatus.signed
 
     db.commit()
+    db.refresh(contract)
 
     return {
         "message": "Contract signed successfully",
         "contract_number": contract.contract_number,
-        "signed_at": now
+        "signed_at": now.isoformat()
     }
