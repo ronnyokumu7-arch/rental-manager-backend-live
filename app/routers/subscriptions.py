@@ -20,6 +20,7 @@ super_admin_only = Depends(require_role([UserRole.super_admin]))
 PLAN_DURATIONS = {
     PlanType.free_trial: 30,
     PlanType.starter_trial: 14,
+    PlanType.pay_as_you_go: None,  # Usage-driven / Indefinite
     PlanType.starter: None,
     PlanType.pro: None,
     PlanType.enterprise: None,
@@ -55,6 +56,8 @@ def _compute_ends_at(plan: PlanType, billing_cycle: BillingCycle, starts_at: dat
         return starts_at + timedelta(days=30)
     if plan == PlanType.starter_trial:
         return starts_at + timedelta(days=14)
+    if plan == PlanType.pay_as_you_go:
+        return None  # Indefinite term
     if billing_cycle == BillingCycle.monthly:
         return starts_at + timedelta(days=30)
     if billing_cycle == BillingCycle.annual:

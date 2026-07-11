@@ -8,8 +8,8 @@ from app.models.subscriptions import BillingCycle, PlanType, SubscriptionStatus
 
 class SubscriptionCreate(BaseModel):
     tenant_id: int
-    plan: PlanType = PlanType.free_trial
-    billing_cycle: BillingCycle = BillingCycle.trial
+    plan: PlanType = PlanType.pay_as_you_go
+    billing_cycle: BillingCycle = BillingCycle.pay_as_you_go
     auto_renew: bool = True
 
 

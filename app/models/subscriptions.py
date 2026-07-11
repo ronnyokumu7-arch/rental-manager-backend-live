@@ -10,6 +10,7 @@ from app.db.database import Base
 class PlanType(str, enum.Enum):
     free_trial = "free_trial"
     starter_trial = "starter_trial"
+    pay_as_you_go = "pay_as_you_go"  # <--- Added PAYG plan tier
     starter = "starter"
     pro = "pro"
     enterprise = "enterprise"
@@ -17,6 +18,7 @@ class PlanType(str, enum.Enum):
 
 class BillingCycle(str, enum.Enum):
     trial = "trial"
+    pay_as_you_go = "pay_as_you_go"  # <--- Added for pay-per-use cycles
     monthly = "monthly"
     annual = "annual"
 

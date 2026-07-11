@@ -1,36 +1,68 @@
+import enum
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Any, Dict, Optional
+
 from pydantic import BaseModel, EmailStr, Field
-from app.models.tenants import SubscriptionStatus
+
+from app.models.tenants import PaymentMethodType, SubscriptionStatus
+
+
+# ---------------------------------------------------------------------------
+# Base & Input Schemas
+# ---------------------------------------------------------------------------
 
 class TenantBase(BaseModel):
-    name: str = Field(min_length=1, max_length=255)
-    email: EmailStr
-    phone_number: Optional[str] = Field(default=None, max_length=50)
-    plan: Literal["free_trial", "starter_trial", "starter", "pro", "enterprise"] = "free_trial"
-    is_active: bool = True
+    name: str = Field(..., min_length=2, max_length=150, description="Agency or company name")
+    email: EmailStr = Field(..., description="Primary contact/billing email")
+    phone_number: Optional[str] = Field(None, description="Primary contact / M-Pesa phone number")
+
 
 class TenantCreate(TenantBase):
-    pass
+    plan: str = Field(default="free_trial", description="Initial plan tier")
+    
+    # Optional payment setup at onboarding
+    default_payment_method: Optional[PaymentMethodType] = None
+    stripe_customer_id: Optional[str] = None
+    paypal_payer_id: Optional[str] = None
+    payment_metadata: Optional[Dict[str, Any]] = None
+
 
 class TenantUpdate(BaseModel):
-    name: Optional[str] = Field(default=None, min_length=1, max_length=255)
+    name: Optional[str] = Field(None, min_length=2, max_length=150)
     email: Optional[EmailStr] = None
-    phone_number: Optional[str] = Field(default=None, max_length=50)
-    plan: Optional[Literal["free_trial", "starter_trial", "starter", "pro", "enterprise"]] = None
-    is_active: Optional[bool] = None
-
-class TenantOut(BaseModel):
-    id: int
-    name: str
-    email: EmailStr
     phone_number: Optional[str] = None
-    plan: str
-    is_active: bool
+    is_active: Optional[bool] = None
+    plan: Optional[str] = None
     subscription_status: Optional[SubscriptionStatus] = None
+    
+    # Optional payment update fields
+    default_payment_method: Optional[PaymentMethodType] = None
+    stripe_customer_id: Optional[str] = None
+    paypal_payer_id: Optional[str] = None
+    payment_metadata: Optional[Dict[str, Any]] = None
+
+
+# ---------------------------------------------------------------------------
+# Output Schemas
+# ---------------------------------------------------------------------------
+
+class TenantOut(TenantBase):
+    id: int
+    is_active: bool
+    plan: str
+    subscription_status: SubscriptionStatus
+    
+    # Trial & Subscription Lifecycle Timestamps
     trial_ends_at: Optional[datetime] = None
     subscription_ends_at: Optional[datetime] = None
     grace_period_ends_at: Optional[datetime] = None
+    
+    # Optional Payment Method Info
+    default_payment_method: Optional[PaymentMethodType] = None
+    stripe_customer_id: Optional[str] = None
+    paypal_payer_id: Optional[str] = None
+    payment_metadata: Optional[Dict[str, Any]] = None
+    
     created_at: datetime
     updated_at: datetime
 

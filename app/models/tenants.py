@@ -1,8 +1,9 @@
 import enum
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, JSON
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
+
 
 class SubscriptionStatus(str, enum.Enum):
     trial = "trial"
@@ -12,17 +13,28 @@ class SubscriptionStatus(str, enum.Enum):
     suspended = "suspended"
     cancelled = "cancelled"
 
+
+class PaymentMethodType(str, enum.Enum):
+    mpesa = "mpesa"
+    card = "card"        # VISA, Mastercard via Stripe/Flutterwave
+    paypal = "paypal"
+    bank = "bank"
+
+
 class Tenant(Base):
     __tablename__ = "tenants"
     
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String, nullable=False, index=True)
     email = Column(String, unique=True, nullable=False)
-    phone_number = Column(String, nullable=True)
+    phone_number = Column(String, nullable=True)  # Primary contact / M-Pesa number
     
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
-    plan = Column(String, nullable=False, default="free_trial", server_default="free_trial")
     
+    # -----------------------------------------------------------------------
+    # Option 1 Defaults: Everyone starts on a Free Trial
+    # -----------------------------------------------------------------------
+    plan = Column(String, nullable=False, default="free_trial", server_default="free_trial")
     subscription_status = Column(
         Enum(SubscriptionStatus),
         nullable=False,
@@ -33,7 +45,20 @@ class Tenant(Base):
     trial_ends_at = Column(DateTime(timezone=True), nullable=True)
     subscription_ends_at = Column(DateTime(timezone=True), nullable=True)
     grace_period_ends_at = Column(DateTime(timezone=True), nullable=True)
+
+    # -----------------------------------------------------------------------
+    # Payment Gateway Readiness (Optional at signup)
+    # -----------------------------------------------------------------------
+    default_payment_method = Column(Enum(PaymentMethodType), nullable=True)
     
+    # Provider-specific references (e.g., Stripe Customer ID 'cus_xxx', PayPal Payer ID)
+    stripe_customer_id = Column(String, nullable=True, index=True)
+    paypal_payer_id = Column(String, nullable=True)
+    
+    # Store safe payment metadata (e.g., {"last4": "4242", "brand": "visa", "mpesa_phone": "2547..."})
+    payment_metadata = Column(JSON, nullable=True)
+    
+    # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
