@@ -81,3 +81,14 @@ def create_tenant(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to provision tenant environment: {str(e)}"
         )
+
+
+@router.get("/", response_model=list[TenantOut])
+def list_tenants(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    tenants = db.query(Tenant).offset(skip).limit(limit).all()
+    return tenants
