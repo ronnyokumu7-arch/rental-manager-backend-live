@@ -14,13 +14,23 @@ from app.models.tenants import PaymentMethodType, SubscriptionStatus
 class TenantBase(BaseModel):
     name: str = Field(..., min_length=2, max_length=150, description="Agency or company name")
     email: EmailStr = Field(..., description="Primary contact/billing email")
-    phone_number: Optional[str] = Field(None, description="Primary contact / M-Pesa phone number")
+    phone_number: Optional[str] = Field(None, description="Primary contact / phone number")
 
 
 class TenantCreate(TenantBase):
     plan: str = Field(default="free_trial", description="Initial plan tier")
     
-    # Optional payment setup at onboarding
+    # Operational & Profile Setup
+    admin_name: Optional[str] = Field(None, description="Initial Tenant Admin full name")
+    admin_phone: Optional[str] = Field(None, description="Initial Tenant Admin direct phone")
+    business_location: Optional[str] = None
+    kra_pin: Optional[str] = None
+    currency: str = Field(default="KES")
+    time_zone: str = Field(default="Africa/Nairobi")
+    is_corporate: bool = False
+    billing_cycle: Optional[str] = "monthly"
+
+    # Optional payment setup
     default_payment_method: Optional[PaymentMethodType] = None
     stripe_customer_id: Optional[str] = None
     paypal_payer_id: Optional[str] = None
@@ -35,7 +45,6 @@ class TenantUpdate(BaseModel):
     plan: Optional[str] = None
     subscription_status: Optional[SubscriptionStatus] = None
     
-    # Optional payment update fields
     default_payment_method: Optional[PaymentMethodType] = None
     stripe_customer_id: Optional[str] = None
     paypal_payer_id: Optional[str] = None
@@ -52,12 +61,10 @@ class TenantOut(TenantBase):
     plan: str
     subscription_status: SubscriptionStatus
     
-    # Trial & Subscription Lifecycle Timestamps
     trial_ends_at: Optional[datetime] = None
     subscription_ends_at: Optional[datetime] = None
     grace_period_ends_at: Optional[datetime] = None
     
-    # Optional Payment Method Info
     default_payment_method: Optional[PaymentMethodType] = None
     stripe_customer_id: Optional[str] = None
     paypal_payer_id: Optional[str] = None
