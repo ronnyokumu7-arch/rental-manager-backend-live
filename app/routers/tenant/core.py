@@ -158,6 +158,20 @@ def list_tenants(
     return tenants
 
 
+@router.get("/{tenant_id}", response_model=TenantOut)
+def get_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    """Retrieve full details for a single tenant by ID."""
+    tenant = db.query(Tenant).options(joinedload(Tenant.profile)).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    
+    return tenant
+
+
 @router.patch("/{tenant_id}", response_model=TenantOut)
 def update_tenant(
     tenant_id: int,
