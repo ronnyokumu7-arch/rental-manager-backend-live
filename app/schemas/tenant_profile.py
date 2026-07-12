@@ -5,51 +5,62 @@ from pydantic import BaseModel, Field, field_validator
 
 class TenantProfileBase(BaseModel):
     """Maps to TenantProfile SQLAlchemy model. 
-    Uses DB column names directly to avoid serialization mismatches."""
+    Aligned with Frontend Wizard terminology for seamless integration."""
     
-    company_name: Optional[str] = Field(None, max_length=150, description="Legal company name (mirrors Tenant.name)")
-    address: Optional[str] = Field(None, max_length=255, description="Physical office or yard address")
+    # Identity & Contact
+    company_name: Optional[str] = Field(None, max_length=150, description="Legal company name")
+    business_location: Optional[str] = Field(None, max_length=255, alias="address", description="Physical office or yard address")
     phone: Optional[str] = Field(None, max_length=30, description="Business contact phone")
     email: Optional[str] = Field(None, max_length=255, description="Business contact email")
     website: Optional[str] = Field(None, max_length=255, description="Company website URL")
-    tax_number: Optional[str] = Field(None, max_length=20, description="KRA PIN / Tax Identifier")
+    
+    # Compliance & Tax
+    kra_pin: Optional[str] = Field(None, max_length=20, alias="tax_number", description="KRA PIN for tax invoicing in Kenya")
+    
+    # Branding & Contracts
     logo_url: Optional[str] = Field(None, max_length=500, description="URL to company logo")
     contract_prefix: str = Field(..., max_length=10, description="Auto-generated prefix e.g. T0001")
-    contract_footer: Optional[str] = Field(None, description="Default boilerplate terms for rental agreements")
+    contract_terms: Optional[str] = Field(None, alias="contract_footer", description="Default boilerplate terms for rental agreements")
 
-    @field_validator("tax_number", mode="before")
+    @field_validator("kra_pin", mode="before")
     @classmethod
-    def clean_tax_number(cls, v):
+    def clean_kra_pin(cls, v):
         if isinstance(v, str):
             cleaned = v.strip().upper()
             return cleaned if cleaned else None
         return v
 
+    class Config:
+        populate_by_name = True # Allows both 'kra_pin' and 'tax_number' to work
+
 
 class TenantProfileCreate(TenantProfileBase):
-    """Used internally by create_tenant route. Not exposed to frontend directly."""
+    """Used internally by create_tenant route."""
     pass
 
 
 class TenantProfileUpdate(BaseModel):
     """For updating profile after initial creation."""
     company_name: Optional[str] = Field(None, max_length=150)
-    address: Optional[str] = Field(None, max_length=255)
+    business_location: Optional[str] = Field(None, max_length=255, alias="address")
     phone: Optional[str] = Field(None, max_length=30)
     email: Optional[str] = Field(None, max_length=255)
     website: Optional[str] = Field(None, max_length=255)
-    tax_number: Optional[str] = Field(None, max_length=20)
+    kra_pin: Optional[str] = Field(None, max_length=20, alias="tax_number")
     logo_url: Optional[str] = Field(None, max_length=500)
     contract_prefix: Optional[str] = Field(None, max_length=10)
-    contract_footer: Optional[str] = None
+    contract_terms: Optional[str] = Field(None, alias="contract_footer")
 
-    @field_validator("tax_number", mode="before")
+    @field_validator("kra_pin", mode="before")
     @classmethod
-    def clean_tax_number(cls, v):
+    def clean_kra_pin(cls, v):
         if isinstance(v, str):
             cleaned = v.strip().upper()
             return cleaned if cleaned else None
         return v
+
+    class Config:
+        populate_by_name = True
 
 
 class TenantProfileOut(TenantProfileBase):

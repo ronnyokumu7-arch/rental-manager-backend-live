@@ -97,7 +97,7 @@ def create_tenant(
             email=payload.admin_email.strip(),
             full_name=(payload.admin_name or payload.name).strip(),
             phone_number=admin_phone or phone_number,
-            hashed_password=get_password_hash(payload.password),
+            password_hash=get_password_hash(payload.password),
             role=UserRole.tenant_admin,
             tenant_id=tenant.id,
             is_active=True,
