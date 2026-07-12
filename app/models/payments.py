@@ -1,3 +1,4 @@
+# app/models/payments.py
 import enum
 
 from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
@@ -9,6 +10,10 @@ from app.db.database import Base
 
 class PaymentMethod(str, enum.Enum):
     mpesa = "mpesa"
+    airtel_money = "airtel_money"
+    card = "card"
+    paypal = "paypal"
+    bank = "bank"
     manual = "manual"
 
 
