@@ -34,6 +34,13 @@ class Tenant(Base):
     phone_number = Column(String(30), nullable=True)  # Primary contact / M-Pesa number
     
     # -----------------------------------------------------------------------
+    # ✅ NEW: Denormalized Admin Snapshot (for zero-join Super Admin lookups)
+    # -----------------------------------------------------------------------
+    admin_name = Column(String(150), nullable=True)
+    admin_email = Column(String(255), nullable=True)
+    admin_phone = Column(String(30), nullable=True)
+    
+    # -----------------------------------------------------------------------
     # Lifecycle & Multi-Tenancy (Vault/Suspension)
     # -----------------------------------------------------------------------
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")

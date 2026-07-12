@@ -1,6 +1,6 @@
 # app/api/routes/tenants.py
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
 from typing import Optional
 
@@ -47,7 +47,7 @@ def create_tenant(
             detail="A tenant with this primary email already exists."
         )
 
-    existing_user = db.query(User).filter(User.email == payload.email).first()
+    existing_user = db.query(User).filter(User.email == payload.admin_email).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -55,11 +55,17 @@ def create_tenant(
         )
 
     try:
-        # 3. Create Core Tenant Record
+        # 3. Create Core Tenant Record (with Denormalized Admin Snapshot)
         tenant = Tenant(
             name=payload.name.strip(),
             email=payload.email.strip(),
             phone_number=phone_number,
+            
+            # ✅ NEW: Save Admin Details directly to Tenant Table for fast lookups
+            admin_name=(payload.admin_name or payload.name).strip(),
+            admin_email=payload.admin_email.strip(),
+            admin_phone=admin_phone or phone_number,
+            
             plan=payload.plan or "free_trial",
             subscription_status=SubscriptionStatus.trial,
             default_payment_method=payload.default_payment_method,
@@ -67,7 +73,7 @@ def create_tenant(
             paypal_payer_id=paypal_payer_id,
             payment_metadata=payload.payment_metadata or {},
             is_active=True,
-            is_archived=False,  # Explicitly set for vault filtering
+            is_archived=False,
         )
         db.add(tenant)
         db.flush()  # Generates tenant.id without committing yet
@@ -76,18 +82,19 @@ def create_tenant(
         contract_prefix = f"T{tenant.id:04d}" 
         
         profile = TenantProfile(
-          tenant_id=tenant.id,
-          company_name=payload.name.strip(),      # ✅ Mirrors Tenant.name
-          address=business_location,              # ✅ Maps wizard.business_location → DB.address
-          phone=phone_number,                     # ✅ Mirrors Tenant.phone_number
-          email=payload.email.strip(),            # ✅ Mirrors Tenant.email
-          tax_number=kra_pin.upper() if kra_pin else None,  # ✅ Maps wizard.kra_pin → DB.tax_number
-          contract_prefix=contract_prefix,        )
+            tenant_id=tenant.id,
+            company_name=payload.name.strip(),
+            address=business_location,
+            phone=phone_number,
+            email=payload.email.strip(),
+            tax_number=kra_pin.upper() if kra_pin else None,
+            contract_prefix=contract_prefix,
+        )
         db.add(profile)
 
-        # 5. Auto-provision Initial Tenant Admin User
+        # 5. Auto-provision Initial Tenant Admin User (For Auth)
         admin_user = User(
-            email=payload.email.strip(),
+            email=payload.admin_email.strip(),
             full_name=(payload.admin_name or payload.name).strip(),
             phone_number=admin_phone or phone_number,
             hashed_password=get_password_hash(payload.password),
@@ -98,7 +105,10 @@ def create_tenant(
         db.add(admin_user)
 
         db.commit()
+        
+        # ✅ CRITICAL FIX: Eagerly load profile so Pydantic can serialize it
         db.refresh(tenant)
+        db.refresh(tenant.profile) 
         return tenant
 
     except IntegrityError:
@@ -125,27 +135,30 @@ def list_tenants(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    query = db.query(Tenant)
+    # ✅ FIX: Use subquery for search to avoid row duplication from JOIN
+    base_query = db.query(Tenant)
     
-    # Multi-tenancy & Vault Enforcement
-    if not show_archived:
-        query = query.filter(Tenant.is_archived == False)
-        
-    if status_filter == "ACTIVE":
-        query = query.filter(Tenant.is_active == True)
-    elif status_filter == "SUSPENDED":
-        query = query.filter(Tenant.is_active == False)
-        
     if search:
         search_term = f"%{search}%"
-        # Join profile to search KRA PIN
-        from sqlalchemy.orm import joinedload
-        query = query.join(TenantProfile).filter(
+        matching_ids = db.query(Tenant.id).join(TenantProfile).filter(
             (Tenant.name.ilike(search_term)) | 
-            (TenantProfile.kra_pin.ilike(search_term))
-        )
+            (TenantProfile.tax_number.ilike(search_term))
+        ).subquery()
+        base_query = base_query.filter(Tenant.id.in_(matching_ids))
 
-    tenants = query.offset(skip).limit(limit).all()
+    # Multi-tenancy & Vault Enforcement
+    if not show_archived:
+        base_query = base_query.filter(Tenant.is_archived == False)
+        
+    if status_filter == "ACTIVE":
+        base_query = base_query.filter(Tenant.is_active == True)
+    elif status_filter == "SUSPENDED":
+        base_query = base_query.filter(Tenant.is_active == False)
+        
+    # ✅ FIX: Eager load profile to satisfy TenantOut schema
+    query = base_query.options(joinedload(Tenant.profile)).offset(skip).limit(limit)
+    
+    tenants = query.all()
     return tenants
 
 
@@ -156,7 +169,7 @@ def update_tenant(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = db.query(Tenant).options(joinedload(Tenant.profile)).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
 
@@ -167,6 +180,7 @@ def update_tenant(
     try:
         db.commit()
         db.refresh(tenant)
+        db.refresh(tenant.profile)
         return tenant
     except IntegrityError:
         db.rollback()
@@ -183,14 +197,14 @@ def suspend_tenant(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = db.query(Tenant).options(joinedload(Tenant.profile)).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
     
     tenant.is_active = False
-    # You could add a suspension_reason column to Tenant model later
     db.commit()
     db.refresh(tenant)
+    db.refresh(tenant.profile)
     return tenant
 
 
@@ -200,13 +214,14 @@ def activate_tenant(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = db.query(Tenant).options(joinedload(Tenant.profile)).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
     
     tenant.is_active = True
     db.commit()
     db.refresh(tenant)
+    db.refresh(tenant.profile)
     return tenant
 
 
@@ -217,14 +232,15 @@ def archive_tenant(
     current_user: User = super_admin_only,
 ):
     """Moves tenant to Vault (Soft Delete)"""
-    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    tenant = db.query(Tenant).options(joinedload(Tenant.profile)).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
     
     tenant.is_archived = True
-    tenant.is_active = False  # Automatically deactivate when archived
+    tenant.is_active = False
     db.commit()
     db.refresh(tenant)
+    db.refresh(tenant.profile)
     return tenant
 
 
