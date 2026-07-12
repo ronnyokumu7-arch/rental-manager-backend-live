@@ -1,5 +1,8 @@
+# app/models/tenants.py
 import enum
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, JSON
+from datetime import datetime
+from typing import Optional
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, String, JSON, Text, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
@@ -16,7 +19,7 @@ class SubscriptionStatus(str, enum.Enum):
 
 class PaymentMethodType(str, enum.Enum):
     mpesa = "mpesa"
-    card = "card"        # VISA, Mastercard via Stripe/Flutterwave
+    card = "card"
     paypal = "paypal"
     bank = "bank"
 
@@ -24,17 +27,24 @@ class PaymentMethodType(str, enum.Enum):
 class Tenant(Base):
     __tablename__ = "tenants"
     
+    # Primary Keys & Identity
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String, nullable=False, index=True)
-    email = Column(String, unique=True, nullable=False)
-    phone_number = Column(String, nullable=True)  # Primary contact / M-Pesa number
+    name = Column(String(150), nullable=False, index=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    phone_number = Column(String(30), nullable=True)  # Primary contact / M-Pesa number
     
+    # -----------------------------------------------------------------------
+    # Lifecycle & Multi-Tenancy (Vault/Suspension)
+    # -----------------------------------------------------------------------
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
+    is_archived = Column(Boolean, nullable=False, default=False, server_default="false")
+    suspended_at = Column(DateTime(timezone=True), nullable=True)
+    suspension_reason = Column(Text, nullable=True)
     
     # -----------------------------------------------------------------------
-    # Option 1 Defaults: Everyone starts on a Free Trial
+    # Subscription & Billing
     # -----------------------------------------------------------------------
-    plan = Column(String, nullable=False, default="free_trial", server_default="free_trial")
+    plan = Column(String(50), nullable=False, default="free_trial", server_default="free_trial")
     subscription_status = Column(
         Enum(SubscriptionStatus),
         nullable=False,
@@ -46,16 +56,10 @@ class Tenant(Base):
     subscription_ends_at = Column(DateTime(timezone=True), nullable=True)
     grace_period_ends_at = Column(DateTime(timezone=True), nullable=True)
 
-    # -----------------------------------------------------------------------
-    # Payment Gateway Readiness (Optional at signup)
-    # -----------------------------------------------------------------------
+    # Payment Gateway Readiness
     default_payment_method = Column(Enum(PaymentMethodType), nullable=True)
-    
-    # Provider-specific references (e.g., Stripe Customer ID 'cus_xxx', PayPal Payer ID)
-    stripe_customer_id = Column(String, nullable=True, index=True)
-    paypal_payer_id = Column(String, nullable=True)
-    
-    # Store safe payment metadata (e.g., {"last4": "4242", "brand": "visa", "mpesa_phone": "2547..."})
+    stripe_customer_id = Column(String(100), nullable=True, index=True)
+    paypal_payer_id = Column(String(100), nullable=True)
     payment_metadata = Column(JSON, nullable=True)
     
     # Timestamps
@@ -73,3 +77,8 @@ class Tenant(Base):
     profile = relationship("TenantProfile", back_populates="tenant", uselist=False, cascade="all, delete-orphan")
     policies = relationship("TenantPolicy", back_populates="tenant", cascade="all, delete-orphan")
     contracts = relationship("Contract", back_populates="tenant", cascade="all, delete-orphan")
+
+    # ✅ FIX: Composite index for Super Admin search + vault filtering performance
+    __table_args__ = (
+        Index('ix_tenants_search_vault', 'is_archived', 'name'),
+    )

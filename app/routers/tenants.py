@@ -1,7 +1,8 @@
 # app/api/routes/tenants.py
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
+from typing import Optional
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
@@ -9,7 +10,7 @@ from app.dependencies.rbac import require_role
 from app.models.tenants import Tenant, SubscriptionStatus
 from app.models.tenant_profile import TenantProfile
 from app.models.users import User, UserRole
-from app.schemas.tenant import TenantCreate, TenantOut
+from app.schemas.tenant import TenantCreate, TenantUpdate, TenantOut
 from app.core.security import get_password_hash
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
@@ -30,7 +31,7 @@ def create_tenant(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    # 1. Sanitize all optional string inputs immediately
+    # 1. Sanitize optional string inputs immediately
     phone_number = _clean_string(payload.phone_number)
     kra_pin = _clean_string(payload.kra_pin)
     business_location = _clean_string(payload.business_location)
@@ -65,6 +66,8 @@ def create_tenant(
             stripe_customer_id=stripe_customer_id,
             paypal_payer_id=paypal_payer_id,
             payment_metadata=payload.payment_metadata or {},
+            is_active=True,
+            is_archived=False,  # Explicitly set for vault filtering
         )
         db.add(tenant)
         db.flush()  # Generates tenant.id without committing yet
@@ -73,18 +76,16 @@ def create_tenant(
         contract_prefix = f"T{tenant.id:04d}" 
         
         profile = TenantProfile(
-            tenant_id=tenant.id,
-            business_location=business_location,
-            kra_pin=kra_pin.upper() if kra_pin else None,
-            currency=payload.currency or "KES",
-            time_zone=payload.time_zone or "Africa/Nairobi",
-            is_corporate=payload.is_corporate,
-            contract_prefix=contract_prefix,
-        )
+          tenant_id=tenant.id,
+          company_name=payload.name.strip(),      # ✅ Mirrors Tenant.name
+          address=business_location,              # ✅ Maps wizard.business_location → DB.address
+          phone=phone_number,                     # ✅ Mirrors Tenant.phone_number
+          email=payload.email.strip(),            # ✅ Mirrors Tenant.email
+          tax_number=kra_pin.upper() if kra_pin else None,  # ✅ Maps wizard.kra_pin → DB.tax_number
+          contract_prefix=contract_prefix,        )
         db.add(profile)
 
         # 5. Auto-provision Initial Tenant Admin User
-        # ✅ CRITICAL FIX: Uses the ACTUAL password from the frontend payload
         admin_user = User(
             email=payload.email.strip(),
             full_name=(payload.admin_name or payload.name).strip(),
@@ -96,7 +97,6 @@ def create_tenant(
         )
         db.add(admin_user)
 
-        # Commit everything as a single atomic unit
         db.commit()
         db.refresh(tenant)
         return tenant
@@ -117,10 +117,133 @@ def create_tenant(
 
 @router.get("/", response_model=list[TenantOut])
 def list_tenants(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=500),
+    search: Optional[str] = Query(None, description="Search by name or KRA PIN"),
+    status_filter: Optional[str] = Query(None, alias="status", description="Filter by ACTIVE or SUSPENDED"),
+    show_archived: bool = Query(False, description="Include archived/vaulted tenants"),
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    tenants = db.query(Tenant).offset(skip).limit(limit).all()
+    query = db.query(Tenant)
+    
+    # Multi-tenancy & Vault Enforcement
+    if not show_archived:
+        query = query.filter(Tenant.is_archived == False)
+        
+    if status_filter == "ACTIVE":
+        query = query.filter(Tenant.is_active == True)
+    elif status_filter == "SUSPENDED":
+        query = query.filter(Tenant.is_active == False)
+        
+    if search:
+        search_term = f"%{search}%"
+        # Join profile to search KRA PIN
+        from sqlalchemy.orm import joinedload
+        query = query.join(TenantProfile).filter(
+            (Tenant.name.ilike(search_term)) | 
+            (TenantProfile.kra_pin.ilike(search_term))
+        )
+
+    tenants = query.offset(skip).limit(limit).all()
     return tenants
+
+
+@router.patch("/{tenant_id}", response_model=TenantOut)
+def update_tenant(
+    tenant_id: int,
+    payload: TenantUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        setattr(tenant, field, value)
+
+    try:
+        db.commit()
+        db.refresh(tenant)
+        return tenant
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Update failed due to a unique constraint violation."
+        )
+
+
+@router.post("/{tenant_id}/suspend", response_model=TenantOut)
+def suspend_tenant(
+    tenant_id: int,
+    reason: Optional[str] = "Administrative Action",
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    
+    tenant.is_active = False
+    # You could add a suspension_reason column to Tenant model later
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+@router.post("/{tenant_id}/activate", response_model=TenantOut)
+def activate_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    
+    tenant.is_active = True
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+@router.post("/{tenant_id}/archive", response_model=TenantOut)
+def archive_tenant(
+    tenant_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    """Moves tenant to Vault (Soft Delete)"""
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    
+    tenant.is_archived = True
+    tenant.is_active = False  # Automatically deactivate when archived
+    db.commit()
+    db.refresh(tenant)
+    return tenant
+
+
+@router.delete("/{tenant_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tenant(
+    tenant_id: int,
+    hard_delete: bool = Query(False, description="Permanently remove from DB instead of archiving"),
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")
+    
+    if hard_delete:
+        db.delete(tenant)
+        db.commit()
+    else:
+        # Default behavior is soft delete / archive
+        tenant.is_archived = True
+        tenant.is_active = False
+        db.commit()
