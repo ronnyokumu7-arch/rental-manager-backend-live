@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
@@ -8,10 +9,22 @@ from app.models.tenants import Tenant, SubscriptionStatus
 from app.models.tenant_profile import TenantProfile
 from app.models.users import User, UserRole
 from app.schemas.tenant import TenantCreate, TenantOut
-from app.core.security import get_password_hash # Adjust import path according to your auth utils
+from app.core.security import get_password_hash
 
 router = APIRouter(prefix="/tenants", tags=["tenants"])
 super_admin_only = Depends(require_role([UserRole.super_admin]))
+
+
+def _clean_string(value: str | None) -> str | None:
+    """
+    Converts empty strings to None. 
+    This prevents 500 IntegrityErrors when optional fields with unique 
+    constraints (like KRA PIN) receive "" instead of NULL from the frontend.
+    """
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned if cleaned else None
+    return value
 
 
 @router.post("/", response_model=TenantOut, status_code=status.HTTP_201_CREATED)
@@ -20,36 +33,53 @@ def create_tenant(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    # 1. Prevent duplicate email registration
-    existing = db.query(Tenant).filter(Tenant.email == payload.email).first()
-    if existing:
+    # Clean optional string fields to prevent DB constraint errors
+    phone_number = _clean_string(payload.phone_number)
+    kra_pin = _clean_string(payload.kra_pin)
+    business_location = _clean_string(payload.business_location)
+    admin_phone = _clean_string(payload.admin_phone)
+    stripe_customer_id = _clean_string(payload.stripe_customer_id)
+    paypal_payer_id = _clean_string(payload.paypal_payer_id)
+
+    # 1. Prevent duplicate email registration (Check BOTH Tenant and User tables)
+    existing_tenant = db.query(Tenant).filter(Tenant.email == payload.email).first()
+    if existing_tenant:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="A tenant with this primary email already exists."
         )
 
+    existing_user = db.query(User).filter(User.email == payload.email).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A user with this admin email already exists. Please use a different email."
+        )
+
     try:
         # 2. Create Core Tenant Record
         tenant = Tenant(
-            name=payload.name,
-            email=payload.email,
-            phone_number=payload.phone_number,
-            plan=payload.plan,
+            name=payload.name.strip(),
+            email=payload.email.strip(),
+            phone_number=phone_number,
+            plan=payload.plan or "free_trial",
             subscription_status=SubscriptionStatus.trial,
             default_payment_method=payload.default_payment_method,
-            stripe_customer_id=payload.stripe_customer_id,
-            paypal_payer_id=payload.paypal_payer_id,
+            stripe_customer_id=stripe_customer_id,
+            paypal_payer_id=paypal_payer_id,
             payment_metadata=payload.payment_metadata or {},
         )
         db.add(tenant)
-        db.flush() # Flushes to generate tenant.id without committing transaction yet
+        db.flush()  # Generates tenant.id without committing the transaction yet
 
         # 3. Auto-provision TenantProfile
-        contract_prefix = f"T{tenant.id}"
+        # Zero-pad the ID for cleaner contract prefixes (e.g., T0001, T0042)
+        contract_prefix = f"T{tenant.id:04d}" 
+        
         profile = TenantProfile(
             tenant_id=tenant.id,
-            business_location=payload.business_location,
-            kra_pin=payload.kra_pin,
+            business_location=business_location,
+            kra_pin=kra_pin.upper() if kra_pin else None,
             currency=payload.currency or "KES",
             time_zone=payload.time_zone or "Africa/Nairobi",
             is_corporate=payload.is_corporate,
@@ -58,12 +88,12 @@ def create_tenant(
         db.add(profile)
 
         # 4. Auto-provision Initial Tenant Admin User
-        temp_password = "ChangeMe123!" # Or generate a secure token / invitation link
+        # ✅ FIX: Use the actual password from the payload, not a hardcoded string
         admin_user = User(
-            email=payload.email,
-            full_name=payload.admin_name or payload.name,
-            phone_number=payload.admin_phone or payload.phone_number,
-            hashed_password=get_password_hash(temp_password),
+            email=payload.email.strip(),
+            full_name=(payload.admin_name or payload.name).strip(),
+            phone_number=admin_phone or phone_number,
+            hashed_password=get_password_hash(payload.password),
             role=UserRole.tenant_admin,
             tenant_id=tenant.id,
             is_active=True,
@@ -75,6 +105,13 @@ def create_tenant(
         db.refresh(tenant)
         return tenant
 
+    except IntegrityError:
+        db.rollback()
+        # Catch database-level unique constraint violations just in case
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="A database constraint was violated. This email or tax ID might already be registered."
+        )
     except Exception as e:
         db.rollback()
         raise HTTPException(
