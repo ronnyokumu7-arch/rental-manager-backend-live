@@ -459,3 +459,36 @@ Please review the details and accept the quotation by clicking the button below:
         f"Your Rental Quotation #{quotation_id}", 
         _base_template("Quotation Ready for Review", body)
     )
+
+
+    # ---------------------------------------------------------------------------
+# Recovery & Admin Notification emails
+# ---------------------------------------------------------------------------
+
+def send_sms_otp(phone: str, message: str) -> bool:
+    """
+    Send SMS notification. Currently logs the message.
+    TODO: Integrate with Africa's Talking, Twilio, or similar SMS provider.
+    """
+    logger.info(f"SMS to {phone}: {message}")
+    # In production, integrate with your SMS provider here
+    # Example: africastalking.send(phone, message)
+    return True
+
+
+def send_admin_recovery_notification(
+    to: str,
+    full_name: str,
+    subject: str,
+    custom_message: str,
+) -> bool:
+    """
+    Send a custom recovery notification email to a tenant admin.
+    Used for email change alerts, password reset triggers, etc.
+    """
+    body = f"""
+    
+Dear {full_name},
+{custom_message}
+    """
+    return _send(to, subject, _base_template(subject, body))

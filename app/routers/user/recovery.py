@@ -8,7 +8,7 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.rbac import require_role
 from app.models.users import User, UserRole
 from app.schemas.tenant_recovery import SendResetLinkPayload
-from app.services.email import send_password_reset_email, send_sms_otp
+from app.services.email import send_admin_recovery_notification, send_sms_otp
 from ._helpers import _get_user_or_404
 
 router = APIRouter()
@@ -59,11 +59,12 @@ def send_user_reset_link(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
 
     if payload.send_to_email:
-        send_password_reset_email(
-            to=user.email,
-            full_name=user.full_name,
-            custom_message=payload.custom_message,
-        )
+    send_admin_recovery_notification(
+        to=user.email,
+        full_name=user.full_name,
+        subject="Password Reset Requested",
+        custom_message=payload.custom_message or "A password reset has been requested for your account.",
+    )
 
     if payload.send_to_phone and user.phone_number:
         send_sms_otp(

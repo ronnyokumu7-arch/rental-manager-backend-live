@@ -14,7 +14,7 @@ from app.schemas.tenant_recovery import (
     AdminRecoveryOptionsOut,
     VerificationMethod,
 )
-from app.services.email import send_password_reset_email, send_sms_otp
+from app.services.email import send_admin_recovery_notification, send_sms_otp
 
 router = APIRouter()
 
@@ -95,11 +95,12 @@ def send_reset_link(
 
     # Trigger notifications
     if payload.send_to_email:
-        send_password_reset_email(
-            to=tenant.admin_email,
-            full_name=tenant.admin_name,
-            custom_message=payload.custom_message,
-        )
+    send_admin_recovery_notification(
+        to=tenant.admin_email,
+        full_name=tenant.admin_name,
+        subject="Password Reset Requested",
+        custom_message=payload.custom_message or "A password reset has been requested for your account. Please check your email for the reset link.",
+    )
 
     if payload.send_to_phone and tenant.admin_phone:
         send_sms_otp(
@@ -157,14 +158,15 @@ def change_admin_email(
 
     # Notify old contact channel
     if payload.verification_method == VerificationMethod.email and old_email:
-        send_password_reset_email(
-            to=old_email,
-            full_name=tenant.admin_name,
-            custom_message=(
-                f"Your admin email was changed to {payload.new_email} on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} "
-                f"by Super Admin {current_user.full_name}. If this wasn't authorized, contact support immediately."
-            ),
-        )
+    send_admin_recovery_notification(
+        to=old_email,
+        full_name=tenant.admin_name,
+        subject="Admin Email Changed",
+        custom_message=(
+            f"Your admin email was changed to {payload.new_email} on {datetime.utcnow().strftime('%Y-%m-%d %H:%M')} "
+            f"by Super Admin {current_user.full_name}. If this wasn't authorized, contact support immediately."
+        ),
+    )
     elif payload.verification_method == VerificationMethod.phone and old_phone:
         send_sms_otp(
             phone=old_phone,
