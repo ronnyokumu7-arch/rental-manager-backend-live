@@ -23,6 +23,7 @@ class TenantCreate(TenantBase):
     # Operational & Profile Setup
     admin_name: Optional[str] = Field(None, description="Initial Tenant Admin full name")
     admin_phone: Optional[str] = Field(None, description="Initial Tenant Admin direct phone")
+    password: str = Field(..., description="Initial Tenant Admin password")
     business_location: Optional[str] = None
     kra_pin: Optional[str] = None
     currency: str = Field(default="KES")
