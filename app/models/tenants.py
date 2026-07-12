@@ -80,7 +80,7 @@ class Tenant(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    users = relationship("User", back_populates="tenant", cascade="all, delete-orphan")
+    users = relationship("User", back_populates="tenant", cascade="all, delete-orphan", foreign_keys="[User.tenant_id]")
     clients = relationship("Client", back_populates="tenant", cascade="all, delete-orphan")
     vehicles = relationship("Vehicle", back_populates="tenant", cascade="all, delete-orphan")
     bookings = relationship("Booking", back_populates="tenant", cascade="all, delete-orphan")
