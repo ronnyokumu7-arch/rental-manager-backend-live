@@ -1,3 +1,4 @@
+# app/api/routes/tenants.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -69,7 +70,6 @@ def create_tenant(
         db.flush()  # Generates tenant.id without committing yet
 
         # 4. Auto-provision TenantProfile
-        # Zero-pad ID for professional contract prefixes (e.g., T0001)
         contract_prefix = f"T{tenant.id:04d}" 
         
         profile = TenantProfile(
@@ -84,7 +84,7 @@ def create_tenant(
         db.add(profile)
 
         # 5. Auto-provision Initial Tenant Admin User
-        # ✅ FIX: Use the ACTUAL password from the payload
+        # ✅ CRITICAL FIX: Uses the ACTUAL password from the frontend payload
         admin_user = User(
             email=payload.email.strip(),
             full_name=(payload.admin_name or payload.name).strip(),
