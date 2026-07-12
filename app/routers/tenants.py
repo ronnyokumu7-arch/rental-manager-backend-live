@@ -16,11 +16,7 @@ super_admin_only = Depends(require_role([UserRole.super_admin]))
 
 
 def _clean_string(value: str | None) -> str | None:
-    """
-    Converts empty strings to None. 
-    This prevents 500 IntegrityErrors when optional fields with unique 
-    constraints (like KRA PIN) receive "" instead of NULL from the frontend.
-    """
+    """Converts empty strings to None to prevent DB unique constraint crashes."""
     if isinstance(value, str):
         cleaned = value.strip()
         return cleaned if cleaned else None
@@ -33,7 +29,7 @@ def create_tenant(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
-    # Clean optional string fields to prevent DB constraint errors
+    # 1. Sanitize all optional string inputs immediately
     phone_number = _clean_string(payload.phone_number)
     kra_pin = _clean_string(payload.kra_pin)
     business_location = _clean_string(payload.business_location)
@@ -41,7 +37,7 @@ def create_tenant(
     stripe_customer_id = _clean_string(payload.stripe_customer_id)
     paypal_payer_id = _clean_string(payload.paypal_payer_id)
 
-    # 1. Prevent duplicate email registration (Check BOTH Tenant and User tables)
+    # 2. Prevent duplicate email registration (Check BOTH tables)
     existing_tenant = db.query(Tenant).filter(Tenant.email == payload.email).first()
     if existing_tenant:
         raise HTTPException(
@@ -57,7 +53,7 @@ def create_tenant(
         )
 
     try:
-        # 2. Create Core Tenant Record
+        # 3. Create Core Tenant Record
         tenant = Tenant(
             name=payload.name.strip(),
             email=payload.email.strip(),
@@ -70,10 +66,10 @@ def create_tenant(
             payment_metadata=payload.payment_metadata or {},
         )
         db.add(tenant)
-        db.flush()  # Generates tenant.id without committing the transaction yet
+        db.flush()  # Generates tenant.id without committing yet
 
-        # 3. Auto-provision TenantProfile
-        # Zero-pad the ID for cleaner contract prefixes (e.g., T0001, T0042)
+        # 4. Auto-provision TenantProfile
+        # Zero-pad ID for professional contract prefixes (e.g., T0001)
         contract_prefix = f"T{tenant.id:04d}" 
         
         profile = TenantProfile(
@@ -87,8 +83,8 @@ def create_tenant(
         )
         db.add(profile)
 
-        # 4. Auto-provision Initial Tenant Admin User
-        # ✅ FIX: Use the actual password from the payload, not a hardcoded string
+        # 5. Auto-provision Initial Tenant Admin User
+        # ✅ FIX: Use the ACTUAL password from the payload
         admin_user = User(
             email=payload.email.strip(),
             full_name=(payload.admin_name or payload.name).strip(),
@@ -107,7 +103,6 @@ def create_tenant(
 
     except IntegrityError:
         db.rollback()
-        # Catch database-level unique constraint violations just in case
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="A database constraint was violated. This email or tax ID might already be registered."
