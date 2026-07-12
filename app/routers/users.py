@@ -1,8 +1,8 @@
 # app/routers/users.py
 from fastapi import APIRouter
-from .users.management import router as management_router
-from .users.lifecycle import router as lifecycle_router
-from .users.recovery import router as recovery_router
+from .user.management import router as management_router
+from .user.lifecycle import router as lifecycle_router
+from .user.recovery import router as recovery_router
 
 router = APIRouter(prefix="/users", tags=["users"])
 
