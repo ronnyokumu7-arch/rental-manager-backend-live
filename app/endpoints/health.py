@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func
 
 from app.db.database import Base
-from app.api.deps import get_current_super_admin
+from app.routers.auth import get_current_super_admin
 from app.models.tenants import Tenant
 from app.models.users import User
 from app.models.bookings import Booking
