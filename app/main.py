@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.core.exceptions import http_exception_handler
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.scripts.seed_superadmin import update_password
+from app.endpoints import health
 
 from app.routers import (
     activity_logs,
@@ -104,8 +105,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # 4. Mount Static Directories
 # ---------------------------------------------------------------------------
-# ✅ FIXED: Removed fatal trailing spaces from paths. 
-# Previously, "./uploads " would fail to find the actual "./uploads" folder on Render!
+
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
 
@@ -153,8 +153,9 @@ routers = [
     reports,
     activity_logs,
     tasks,
-    system, # ✅ Added system router to the main loop
+    system,
 ]
 
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
+    app.include_router(health.router, prefix="/api/v1")
