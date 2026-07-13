@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from sqlalchemy import func
 
-from app.core.database import get_db
+from app.db.database import Base
 from app.api.deps import get_current_super_admin
 from app.models.tenants import Tenant
 from app.models.users import User
