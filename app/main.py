@@ -1,4 +1,3 @@
-# app/main.py
 import os
 import json
 from contextlib import asynccontextmanager
@@ -34,29 +33,17 @@ from app.routers import (
     vehicles,
 )
 
-# ---------------------------------------------------------------------------
-# 1. Modern Lifespan Manager (Handles Startup & Shutdown)
-# ---------------------------------------------------------------------------
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    print("🌱 Running seed initialization...")
     try:
         update_password()
-        print("✅ Seed initialization completed.")
     except Exception as e:
-        print(f"⚠️ Warning: Seed initialization encountered an error: {e}")
+        print(f"Seed initialization warning: {e}")
 
-    print("⏰ Starting background scheduler...")
     start_scheduler()
-    
     yield
-    
-    print("🛑 Stopping background scheduler...")
     stop_scheduler()
 
-# ---------------------------------------------------------------------------
-# 2. Initialize FastAPI App
-# ---------------------------------------------------------------------------
 settings = get_settings()
 
 app = FastAPI(
@@ -66,23 +53,14 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# ---------------------------------------------------------------------------
-# 3. Bulletproof CORS Configuration
-# ---------------------------------------------------------------------------
-# ✅ FIXED: Removed trailing space from environment variable name
 cors_origins_env = os.getenv("CORS_ORIGINS")
-
 if cors_origins_env:
     try:
-        # Handle both JSON array strings (e.g., '["url1", "url2"]') and comma-separated strings
-        # ✅ FIXED: Removed trailing spaces from string literals
         if cors_origins_env.strip().startswith("["):
             origins = json.loads(cors_origins_env)
         else:
             origins = [origin.strip() for origin in cors_origins_env.split(",")]
     except Exception:
-        # Fallback if parsing fails
-        # ✅ FIXED: Removed fatal trailing spaces from URLs
         origins = [
             "http://localhost:3000",
             "http://localhost:3002",
@@ -92,8 +70,6 @@ if cors_origins_env:
 else:
     origins = settings.cors_origins
 
-print(f"🌍 CORS Origins configured: {origins}")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
@@ -102,19 +78,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------------------------------------------------------------------
-# 4. Mount Static Directories
-# ---------------------------------------------------------------------------
-
 if os.path.exists("./uploads"):
     app.mount("/uploads", StaticFiles(directory="./uploads"), name="uploads")
 
 if os.path.exists("./storage/contracts"):
     app.mount("/contracts", StaticFiles(directory="./storage/contracts"), name="contracts")
 
-# ---------------------------------------------------------------------------
-# 5. Global Exception Handler & Health Check
-# ---------------------------------------------------------------------------
 app.add_exception_handler(HTTPException, http_exception_handler)
 
 @app.get("/health", tags=["system"])
@@ -132,9 +101,6 @@ def root():
         "health": "/health"
     }
 
-# ---------------------------------------------------------------------------
-# 6. Include All Routers
-# ---------------------------------------------------------------------------
 routers = [
     auth,
     tenants,
@@ -158,4 +124,5 @@ routers = [
 
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
-    app.include_router(health.router, prefix="/api/v1")
+
+app.include_router(health.router, prefix="/api/v1")
