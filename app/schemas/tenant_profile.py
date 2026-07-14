@@ -2,9 +2,8 @@
 from typing import Optional
 from pydantic import BaseModel, Field, field_validator
 
-
 class TenantProfileBase(BaseModel):
-    """Maps to TenantProfile SQLAlchemy model. 
+    """Maps to TenantProfile SQLAlchemy model.
     Aligned with Frontend Wizard terminology for seamless integration."""
     
     # Identity & Contact
@@ -19,7 +18,10 @@ class TenantProfileBase(BaseModel):
     
     # Branding & Contracts
     logo_url: Optional[str] = Field(None, max_length=500, description="URL to company logo")
-    contract_prefix: str = Field(..., max_length=10, description="Auto-generated prefix e.g. T0001")
+    
+    # ✅ FIX: Make optional so frontend doesn't have to send it (backend auto-generates it)
+    contract_prefix: Optional[str] = Field(None, max_length=10, description="Auto-generated prefix e.g. T0001")
+    
     contract_terms: Optional[str] = Field(None, alias="contract_footer", description="Default boilerplate terms for rental agreements")
 
     @field_validator("kra_pin", mode="before")
@@ -33,11 +35,9 @@ class TenantProfileBase(BaseModel):
     class Config:
         populate_by_name = True # Allows both 'kra_pin' and 'tax_number' to work
 
-
 class TenantProfileCreate(TenantProfileBase):
     """Used internally by create_tenant route."""
     pass
-
 
 class TenantProfileUpdate(BaseModel):
     """For updating profile after initial creation."""
@@ -62,9 +62,7 @@ class TenantProfileUpdate(BaseModel):
     class Config:
         populate_by_name = True
 
-
 class TenantProfileOut(TenantProfileBase):
     id: int
     tenant_id: int
-
     model_config = {"from_attributes": True}
