@@ -1,3 +1,4 @@
+# app/models/users.py
 import enum
 from sqlalchemy import Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -19,18 +20,18 @@ class User(Base):
     # Core Identity
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
-    password_hash = Column(String, nullable=False)
-
+    password_hash = Column(String, nullable=True) # Made nullable to support invite-only creation
+    
     # UI Preferences
-    theme_preference = Column(String(20), nullable=True, default="system", server_default="system")  # "light", "dark", "system"
-    density_preference = Column(String(20), nullable=True, default="comfortable", server_default="comfortable")  # "comfortable", "compact"
+    theme_preference = Column(String(20), nullable=True, default="system", server_default="system")
+    density_preference = Column(String(20), nullable=True, default="comfortable", server_default="comfortable")
     
     # Contact & Role Details
     phone_number = Column(String, nullable=True)
-    department = Column(String, nullable=True)  # e.g., "Operations", "Finance & Accounts"
-    job_title = Column(String, nullable=True)   # e.g., "Driver", "Fleet Manager", "Accountant"
+    department = Column(String, nullable=True)
+    job_title = Column(String, nullable=True)
     
-    # Security & Access (Upgraded to JSONB)
+    # Security & Access
     permissions = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list)
     two_factor_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
     last_login_at = Column(DateTime(timezone=True), nullable=True)
@@ -44,6 +45,11 @@ class User(Base):
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     is_suspended = Column(Boolean, nullable=False, default=False, server_default="false")
     suspension_reason = Column(String, nullable=True)
+    
+    # ✅ NEW: Invite & Onboarding Lifecycle
+    invite_token = Column(String, unique=True, index=True, nullable=True)
+    invite_expires_at = Column(DateTime(timezone=True), nullable=True)
+    is_onboarded = Column(Boolean, nullable=False, default=False, server_default="false")
     
     role = Column(
         Enum(UserRole),

@@ -21,10 +21,9 @@ class UserBase(BaseModel):
     dl_number: Optional[str] = None
     dl_expiry: Optional[date] = None
 
-
 class UserCreate(UserBase):
-    password: str = Field(min_length=8, max_length=128)
-
+    # ✅ Made optional so we can create "Pending Invite" users without a password
+    password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
 class UserUpdate(BaseModel):
     tenant_id: Optional[int] = None
@@ -47,11 +46,15 @@ class UserUpdate(BaseModel):
     # Recovery & Security Fields
     phone_verified: Optional[bool] = None
     account_locked_until: Optional[datetime] = None
+    
+    # ✅ NEW: Invite Lifecycle Updates
+    invite_token: Optional[str] = None
+    invite_expires_at: Optional[datetime] = None
+    is_onboarded: Optional[bool] = None
 
-    # ✅ UI Preferences (Moved INSIDE the class so the PATCH endpoint accepts them)
+    # UI Preferences
     theme_preference: Optional[str] = Field(None, max_length=20)
     density_preference: Optional[str] = Field(None, max_length=20)
-
 
 class UserOut(BaseModel):
     id: int
@@ -82,7 +85,12 @@ class UserOut(BaseModel):
     failed_login_attempts: int = 0
     account_locked_until: Optional[datetime] = None
 
-    # ✅ UI Preferences (Explicitly defined here so the GET endpoint returns them)
+    # ✅ NEW: Expose Invite State to Frontend (for "Pending" badges)
+    invite_token: Optional[str] = None
+    invite_expires_at: Optional[datetime] = None
+    is_onboarded: bool = False
+
+    # UI Preferences
     theme_preference: Optional[str] = "system"
     density_preference: Optional[str] = "comfortable"
 
