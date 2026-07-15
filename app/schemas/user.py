@@ -4,10 +4,6 @@ from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field
 from app.models.users import UserRole
 
-    # UI Preferences
-    theme_preference: Optional[str] = Field(None, max_length=20)
-    density_preference: Optional[str] = Field(None, max_length=20)
-
 class UserBase(BaseModel):
     tenant_id: Optional[int] = None
     full_name: str = Field(min_length=1, max_length=255)
@@ -16,8 +12,8 @@ class UserBase(BaseModel):
     is_active: bool = True
 
     phone_number: Optional[str] = None
-    department: Optional[str] = None  # e.g., "Operations"
-    job_title: Optional[str] = None   # e.g., "Driver"
+    department: Optional[str] = None
+    job_title: Optional[str] = None
     permissions: List[str] = Field(default_factory=list)
     two_factor_enabled: bool = False
 
@@ -48,9 +44,13 @@ class UserUpdate(BaseModel):
     dl_number: Optional[str] = None
     dl_expiry: Optional[date] = None
 
-    # ✅ NEW: Recovery & Security Fields (Super Admin Override)
+    # Recovery & Security Fields
     phone_verified: Optional[bool] = None
     account_locked_until: Optional[datetime] = None
+
+    # ✅ UI Preferences (Moved INSIDE the class so the PATCH endpoint accepts them)
+    theme_preference: Optional[str] = Field(None, max_length=20)
+    density_preference: Optional[str] = Field(None, max_length=20)
 
 
 class UserOut(BaseModel):
@@ -77,9 +77,13 @@ class UserOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # ✅ NEW: Recovery & Security Audit Fields (Read-Only)
+    # Recovery & Security Audit Fields
     phone_verified: bool = False
     failed_login_attempts: int = 0
     account_locked_until: Optional[datetime] = None
+
+    # ✅ UI Preferences (Explicitly defined here so the GET endpoint returns them)
+    theme_preference: Optional[str] = "system"
+    density_preference: Optional[str] = "comfortable"
 
     model_config = {"from_attributes": True}
