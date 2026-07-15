@@ -9,6 +9,7 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.rbac import require_role
 from app.models.users import User, UserRole
 from app.models.role_template import RoleTemplate
+from app.models.tenants import Tenant
 from app.core.permissions import ALL_PERMISSION_KEYS
 from app.schemas.user import UserCreate, UserOut, UserUpdate
 from app.services.email import send_welcome_email, send_password_changed
@@ -156,6 +157,21 @@ def update_user(
         
     for field, value in update_data.items():
         setattr(user, field, value)
+    
+    # ✅ CRITICAL SYNC: Keep the denormalized Tenant admin snapshot up to date
+    if user.role == UserRole.tenant_admin and user.tenant_id:
+        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+        if tenant:
+            # Sync name, email, and phone if they were updated
+            if "full_name" in update_data:
+                tenant.admin_name = update_data["full_name"]
+            if "email" in update_data:
+                tenant.admin_email = update_data["email"]
+            if "phone_number" in update_data:
+                tenant.admin_phone = update_data["phone_number"]
+            
+            db.commit()
+            db.refresh(tenant)
         
     try:
         db.commit()

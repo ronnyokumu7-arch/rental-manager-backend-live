@@ -58,15 +58,32 @@ def _enforce_create_permission(current_user: User, new_role: UserRole, new_tenan
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant admins can only create users within their own tenant")
 
 def _enforce_update_permission(current_user: User, target_user: User, update_data: dict) -> None:
+    # Super Admins can update anyone, anything
     if current_user.role == UserRole.super_admin:
         return
+
+    # 1. SELF-UPDATE RULES
     if current_user.id == target_user.id:
-        forbidden_fields = {"role", "tenant_id", "is_active", "permissions", "department", "job_title"}
-        if forbidden_fields.intersection(update_data.keys()):
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot change your own role, tenant, status, or permissions")
+        if current_user.role == UserRole.tenant_admin:
+            # Tenant Admins can update everything about themselves except their tenant_id
+            if "tenant_id" in update_data:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot change your own tenant ID")
+        elif current_user.role == UserRole.tenant_staff:
+            # Staff can ONLY update basic personal details
+            allowed_fields = {"full_name", "email", "phone_number", "password"}
+            requested_fields = set(update_data.keys())
+            disallowed = requested_fields - allowed_fields
+            if disallowed:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Staff members can only update their name, email, phone number, or password.")
         return
+
+    # 2. CROSS-USER UPDATE RULES (Only Tenant Admins can update others)
+    if current_user.role != UserRole.tenant_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only Tenant Admins or Super Admins can update other users.")
+
     if target_user.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant admins can only update users within their own tenant")
+    
     if target_user.role == UserRole.super_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant admins cannot update super admin users")
 
