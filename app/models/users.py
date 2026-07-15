@@ -20,6 +20,10 @@ class User(Base):
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=False)
+
+    # UI Preferences
+    theme_preference = Column(String(20), nullable=True, default="system", server_default="system")  # "light", "dark", "system"
+    density_preference = Column(String(20), nullable=True, default="comfortable", server_default="comfortable")  # "comfortable", "compact"
     
     # Contact & Role Details
     phone_number = Column(String, nullable=True)

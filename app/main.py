@@ -25,12 +25,14 @@ from app.routers import (
     role_templates,
     subscriptions,
     system,
+    user_preferences,
     tasks,
     tenant_policies,
     tenant_profile,
     tenants,
     users,
     vehicles,
+    user_preferences,
 )
 
 @asynccontextmanager

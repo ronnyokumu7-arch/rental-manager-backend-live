@@ -4,6 +4,9 @@ from typing import Optional, List
 from pydantic import BaseModel, EmailStr, Field
 from app.models.users import UserRole
 
+    # UI Preferences
+    theme_preference: Optional[str] = Field(None, max_length=20)
+    density_preference: Optional[str] = Field(None, max_length=20)
 
 class UserBase(BaseModel):
     tenant_id: Optional[int] = None
