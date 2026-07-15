@@ -32,7 +32,6 @@ from app.routers import (
     tenants,
     users,
     vehicles,
-    user_preferences,
 )
 
 @asynccontextmanager
@@ -122,6 +121,7 @@ routers = [
     activity_logs,
     tasks,
     system,
+    user_preferences,
 ]
 
 for router in routers:

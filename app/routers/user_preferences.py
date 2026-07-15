@@ -1,7 +1,5 @@
-# app/routers/user_preferences.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.models.users import User
