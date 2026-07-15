@@ -1,11 +1,28 @@
-# app/routers/users/management.py
-import secrets
-from datetime import datetime, timedelta, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status # ✅ Ensure APIRouter is imported
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-# ... (keep your existing imports) ...
+from app.core.security import get_password_hash, normalize_email
+from app.db.database import get_db
+from app.dependencies.auth import get_current_user
+from app.dependencies.rbac import require_role
+from app.models.users import User, UserRole
+from app.models.role_template import RoleTemplate
+from app.models.tenants import Tenant
+from app.core.permissions import ALL_PERMISSION_KEYS
+from app.schemas.user import UserCreate, UserOut, UserUpdate
+from app.services.email import send_welcome_email, send_password_changed
+from ._helpers import (
+    _validate_job_title_and_department,
+    _get_user_or_404,
+    _validate_tenant_for_role,
+    _enforce_create_permission,
+    _enforce_update_permission,
+)
+
+router = APIRouter() 
+
+admin_or_above = Depends(require_role([UserRole.super_admin, UserRole.tenant_admin]))
 
 @router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(
