@@ -1,7 +1,8 @@
+# app/schemas/vehicle.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.models.vehicles import VehicleStatus
 
 class VehicleBase(BaseModel):
@@ -48,4 +49,12 @@ class VehicleOut(VehicleBase):
     archived_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+    
     model_config = {"from_attributes": True}
+
+# =============================================================================
+# ✅ MILESTONE 3: Payload for resolving the awaiting_mileage lock
+# =============================================================================
+class MileageUpdatePayload(BaseModel):
+    current_mileage: int = Field(gt=0, description="New odometer reading (must be greater than current)")
+    next_service_km: Optional[int] = Field(default=None, description="Optional next service interval")

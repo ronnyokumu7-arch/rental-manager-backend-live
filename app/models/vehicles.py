@@ -9,6 +9,7 @@ class VehicleStatus(str, enum.Enum):
     available = "available"
     rented = "rented"
     maintenance = "maintenance"
+    awaiting_mileage = "awaiting_mileage"
     retired = "retired"
 
 class Vehicle(Base):

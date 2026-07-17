@@ -162,9 +162,17 @@ def list_tenants(
 def get_tenant(
     tenant_id: int,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(get_current_user), # ✅ Changed to allow all logged-in users
 ):
     """Retrieve full details for a single tenant by ID."""
+    
+    # ✅ Security Check: Super admins can see any tenant. Regular users can only see their own.
+    if current_user.role != UserRole.super_admin and current_user.tenant_id != tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="You do not have permission to view this tenant."
+        )
+
     tenant = db.query(Tenant).options(joinedload(Tenant.profile)).filter(Tenant.id == tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant not found")

@@ -48,6 +48,7 @@ class BookingOut(BaseModel):
     return_location: Optional[str] = None
     start_date: datetime
     end_date: datetime
+    original_end_date: Optional[datetime] = None  # ✅ NEW: Immutable audit trail
     daily_rate: Optional[Decimal] = None
     total_amount: Decimal
     currency_code: str
@@ -58,3 +59,8 @@ class BookingOut(BaseModel):
     updated_at: datetime
 
     model_config = {"from_attributes": True}
+
+# ✅ NEW: For Milestone 2 Booking Extensions
+class ExtendBookingPayload(BaseModel):
+    new_end_date: datetime
+    extension_reason: Optional[str] = None

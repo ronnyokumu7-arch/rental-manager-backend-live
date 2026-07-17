@@ -1,4 +1,3 @@
-# app/models/payments.py
 import enum
 
 from sqlalchemy import Column, DateTime, Enum, ForeignKey, Integer, Numeric, String, Text
@@ -21,6 +20,7 @@ class PaymentStatus(str, enum.Enum):
     pending = "pending"
     completed = "completed"
     failed = "failed"
+    void = "void"
 
 
 class Payment(Base):

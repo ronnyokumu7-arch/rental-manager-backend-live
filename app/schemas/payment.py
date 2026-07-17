@@ -1,18 +1,23 @@
-# backend/app/schemas/payment.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+
 from pydantic import BaseModel
+
 from app.models.payments import PaymentMethod, PaymentStatus
 
-# ── Admin Dashboard Schemas ────────────────────────────────────────────────
+
 class PaymentCreate(BaseModel):
-    invoice_id: int
     amount: Decimal
     currency_code: str = "KES"
     method: PaymentMethod
     reference: Optional[str] = None
     notes: Optional[str] = None
+
+
+class PaymentVoid(BaseModel):
+    reason: str
+
 
 class PaymentOut(BaseModel):
     id: int
@@ -27,12 +32,11 @@ class PaymentOut(BaseModel):
     recorded_by: Optional[int] = None
     notes: Optional[str] = None
     created_at: datetime
+    invoice_number: Optional[str] = None
 
     model_config = {"from_attributes": True}
 
-# ── Public Portal Schemas ──────────────────────────────────────────────────
-# ✅ NEW: Used when a client records a payment via the public invoice link.
-# We don't need invoice_id here because the backend extracts it from the URL token.
+
 class PublicPaymentCreate(BaseModel):
     amount: Decimal
     currency_code: str = "KES"
