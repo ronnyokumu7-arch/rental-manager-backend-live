@@ -1,7 +1,8 @@
+# app/schemas/subscription.py
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.subscriptions import BillingCycle, PlanType, SubscriptionStatus
 
@@ -14,9 +15,18 @@ class SubscriptionCreate(BaseModel):
 
 
 class SubscriptionUpdate(BaseModel):
+    plan: Optional[PlanType] = None
+    billing_cycle: Optional[BillingCycle] = None
+    status: Optional[SubscriptionStatus] = None
     auto_renew: Optional[bool] = None
     ends_at: Optional[datetime] = None
     grace_period_ends_at: Optional[datetime] = None
+
+
+class SubscriptionChangePlan(BaseModel):
+    """Schema for tenant plan upgrade/downgrade requests."""
+    plan: PlanType
+    billing_cycle: BillingCycle = BillingCycle.monthly
 
 
 class SubscriptionOut(BaseModel):

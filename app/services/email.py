@@ -1,3 +1,4 @@
+# app/services/email.py
 import logging
 from typing import Optional
 
@@ -351,6 +352,34 @@ def send_password_reset_success(
     )
 
 
+def send_verification_email(
+    to: str,
+    full_name: str,
+    verification_link: str,
+):
+    """
+    Sends an email with a secure link for the user to verify their account.
+    """
+    body = f"""
+    <p>Dear {full_name},</p>
+    <p>Welcome to Rental Manager! To complete your account setup and ensure the security of your data, please verify your email address.</p>
+    <p>Click the button below to verify your account. This link will expire in <strong>24 hours</strong>.</p>
+    <a href="{verification_link}" class="btn">Verify My Account</a>
+    <p style="margin-top: 24px; font-size: 13px; color: #888888;">
+        If you did not request this verification, you can safely ignore this email.
+    </p>
+    <p style="font-size: 13px; color: #888888;">
+        Or copy and paste this link into your browser:<br>
+        <span style="color: #4f8cff; word-break: break-all;">{verification_link}</span>
+    </p>
+    """
+    return _send(
+        to,
+        "Verify Your Rental Manager Account",
+        _base_template("Account Verification", body),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Contract emails
 # ---------------------------------------------------------------------------
@@ -401,20 +430,14 @@ def send_invoice_to_client(
 ):
     """Send invoice notification to a client"""
     body = f"""
-    
-Dear {client_name},
-A new invoice has been issued for your recent rental.
-| Invoice No.
-|{invoice_number}
-|
-| ---|---|
-| Amount Due
-|{currency} {amount_due}
-|
-| Due Date
-|{due_date}
-|
-Please review the details and arrange payment at your earliest convenience.
+    <p>Dear {client_name},</p>
+    <p>A new invoice has been issued for your recent rental.</p>
+    <table class="detail-table">
+        <tr><td>Invoice No.</td><td>{invoice_number}</td></tr>
+        <tr><td>Amount Due</td><td>{currency} {amount_due}</td></tr>
+        <tr><td>Due Date</td><td>{due_date}</td></tr>
+    </table>
+    <p>Please review the details and arrange payment at your earliest convenience.</p>
     """
     return _send(
         to, 
@@ -436,23 +459,18 @@ def send_quotation_to_client(
 ):
     """Send quotation link to client for review and signature."""
     body = f"""
-    
-Dear {client_name},
-We have prepared a rental quotation for your review.
-| Quotation ID
-|#{quotation_id}
-|
-| ---|---|
-| Total Amount
-|{currency} {total_amount}
-|
-| Valid Until
-|{expires_at}
-|
-Please review the details and accept the quotation by clicking the button below:
-[Review Quotation]({quotation_url})
+    <p>Dear {client_name},</p>
+    <p>We have prepared a rental quotation for your review.</p>
+    <table class="detail-table">
+        <tr><td>Quotation ID</td><td>#{quotation_id}</td></tr>
+        <tr><td>Total Amount</td><td>{currency} {total_amount}</td></tr>
+        <tr><td>Valid Until</td><td>{expires_at}</td></tr>
+    </table>
+    <p>Please review the details and accept the quotation by clicking the button below:</p>
+    <a href="{quotation_url}" class="btn">Review Quotation</a>
+    <p style="margin-top: 24px; font-size: 13px; color: #888888;">
         This link will expire on the date specified above. If you have any questions, please contact us.
-    
+    </p>
     """
     return _send(
         to, 
@@ -461,7 +479,7 @@ Please review the details and accept the quotation by clicking the button below:
     )
 
 
-    # ---------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
 # Recovery & Admin Notification emails
 # ---------------------------------------------------------------------------
 
@@ -487,8 +505,7 @@ def send_admin_recovery_notification(
     Used for email change alerts, password reset triggers, etc.
     """
     body = f"""
-    
-Dear {full_name},
-{custom_message}
+    <p>Dear {full_name},</p>
+    <p>{custom_message}</p>
     """
     return _send(to, subject, _base_template(subject, body))

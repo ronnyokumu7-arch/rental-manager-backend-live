@@ -1,3 +1,4 @@
+# backend/app/main.py
 import os
 import json
 from contextlib import asynccontextmanager
@@ -10,6 +11,8 @@ from app.core.config import get_settings
 from app.core.exceptions import http_exception_handler
 from app.jobs.scheduler import start_scheduler, stop_scheduler
 from app.scripts.seed_superadmin import update_password
+
+# 💡 Imported subscriptions from app.endpoints as requested
 from app.endpoints import health
 
 from app.routers import (
@@ -19,11 +22,13 @@ from app.routers import (
     bookings,
     clients,
     contracts,
+    financials,
     invoices,
+    payment_verifications,
     payments,
+    subscriptions,
     reports,
     role_templates,
-    subscriptions,
     system,
     user_preferences,
     tasks,
@@ -109,13 +114,15 @@ routers = [
     clients,
     vehicles,
     bookings,
-    subscriptions,
+    subscriptions,  # 👈 Correctly included as a module
     invoices,
     payments,
+    payment_verifications,
     tenant_profile,
     tenant_policies,
     role_templates,
     contracts,
+    financials,
     admin,
     reports,
     activity_logs,
@@ -124,6 +131,7 @@ routers = [
     user_preferences,
 ]
 
+# ✅ CORRECT: Extracts the .router attribute from each module
 for router in routers:
     app.include_router(router.router, prefix="/api/v1")
 

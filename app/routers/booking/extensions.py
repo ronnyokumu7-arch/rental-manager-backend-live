@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
-from app.dependencies.subscription import require_active_subscription
 from app.models.bookings import Booking, BookingStatus
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.users import User
@@ -26,7 +25,7 @@ def extend_booking(
     booking_id: int,
     payload: ExtendBookingPayload,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     

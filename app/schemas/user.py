@@ -10,6 +10,7 @@ class UserBase(BaseModel):
     email: EmailStr
     role: UserRole = UserRole.tenant_staff
     is_active: bool = True
+    is_suspended: bool = False
 
     phone_number: Optional[str] = None
     department: Optional[str] = None
@@ -20,6 +21,11 @@ class UserBase(BaseModel):
     id_number: Optional[str] = None
     dl_number: Optional[str] = None
     dl_expiry: Optional[date] = None
+    
+    # ✅ NEW: Image URLs for V1 (Base64 or external URLs)
+    avatar_url: Optional[str] = None
+    id_image_url: Optional[str] = None
+    dl_image_url: Optional[str] = None
 
 class UserCreate(UserBase):
     # ✅ Made optional so we can create "Pending Invite" users without a password
@@ -31,6 +37,8 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = None
     role: Optional[UserRole] = None
     is_active: Optional[bool] = None
+    is_suspended: Optional[bool] = None
+    suspension_reason: Optional[str] = None
     password: Optional[str] = Field(default=None, min_length=8, max_length=128)
 
     phone_number: Optional[str] = None
@@ -43,11 +51,17 @@ class UserUpdate(BaseModel):
     dl_number: Optional[str] = None
     dl_expiry: Optional[date] = None
 
-    # Recovery & Security Fields
+    # ✅ NEW: Image URLs
+    avatar_url: Optional[str] = None
+    id_image_url: Optional[str] = None
+    dl_image_url: Optional[str] = None
+
+    # ✅ Verification & Security Fields
+    email_verified: Optional[bool] = None
     phone_verified: Optional[bool] = None
     account_locked_until: Optional[datetime] = None
     
-    # ✅ NEW: Invite Lifecycle Updates
+    # ✅ Invite Lifecycle Updates
     invite_token: Optional[str] = None
     invite_expires_at: Optional[datetime] = None
     is_onboarded: Optional[bool] = None
@@ -80,12 +94,18 @@ class UserOut(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    # Recovery & Security Audit Fields
+    # ✅ NEW: Image URLs
+    avatar_url: Optional[str] = None
+    id_image_url: Optional[str] = None
+    dl_image_url: Optional[str] = None
+
+    # ✅ Verification & Security Audit Fields
+    email_verified: bool = False
     phone_verified: bool = False
     failed_login_attempts: int = 0
     account_locked_until: Optional[datetime] = None
 
-    # ✅ NEW: Expose Invite State to Frontend (for "Pending" badges)
+    # ✅ Expose Invite State to Frontend (for "Pending" badges)
     invite_token: Optional[str] = None
     invite_expires_at: Optional[datetime] = None
     is_onboarded: bool = False
@@ -93,5 +113,26 @@ class UserOut(BaseModel):
     # UI Preferences
     theme_preference: Optional[str] = "system"
     density_preference: Optional[str] = "comfortable"
+    
+    # ✅ NEW: Agency Owner Flag for Frontend UI (Golden Badge)
+    is_tenant_owner: bool = False
 
     model_config = {"from_attributes": True}
+
+# ✅ COMPLETELY REWRITTEN: Self-Service Onboarding Payload
+class AcceptInvitePayload(BaseModel):
+    invite_token: str
+    password: str = Field(min_length=8, max_length=128)
+    
+    # Identity
+    full_name: str = Field(min_length=1, max_length=255)
+    email: EmailStr
+    phone_number: Optional[str] = None
+    avatar_url: Optional[str] = None
+    
+    # Compliance (ID is generally required for staff, DL is conditional)
+    id_number: Optional[str] = None
+    id_image_url: Optional[str] = None
+    dl_number: Optional[str] = None
+    dl_image_url: Optional[str] = None
+    dl_expiry: Optional[date] = None

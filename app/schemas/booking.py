@@ -1,9 +1,12 @@
-# app/schemas/booking.py
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
 from pydantic import BaseModel, Field, model_validator
 from app.models.bookings import BookingStatus
+
+# 💡 Import nested schemas so Pydantic serializes joined relations
+from app.schemas.client import ClientOut
+from app.schemas.vehicle import VehicleOut
 
 class BookingBase(BaseModel):
     client_id: int
@@ -57,6 +60,10 @@ class BookingOut(BaseModel):
     archived_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
+
+    # 💡 ADD NESTED RELATIONSHIPS HERE:
+    client: Optional[ClientOut] = None
+    vehicle: Optional[VehicleOut] = None
 
     model_config = {"from_attributes": True}
 

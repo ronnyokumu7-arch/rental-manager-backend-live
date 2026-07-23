@@ -1,16 +1,17 @@
+# app/routers/subscriptions.py
 from datetime import datetime, timedelta, timezone
-
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.rbac import require_role
-from app.models.subscriptions import BillingCycle, PlanType, Subscription, SubscriptionStatus
 from app.models.tenants import Tenant
+from app.models.subscriptions import BillingCycle, PlanType, Subscription, SubscriptionStatus
 from app.models.users import User, UserRole
 from app.schemas.subscription import SubscriptionCreate, SubscriptionOut, SubscriptionUpdate
-
 
 router = APIRouter(prefix="/subscriptions", tags=["subscriptions"])
 
@@ -66,8 +67,52 @@ def _compute_ends_at(plan: PlanType, billing_cycle: BillingCycle, starts_at: dat
 
 
 # ---------------------------------------------------------------------------
-# Routes
+# Request & Response Schemas (For Manual Provision)
 # ---------------------------------------------------------------------------
+
+class ManualProvisionRequest(BaseModel):
+    tenant_id: int
+    plan: str = Field(..., description="'starter', 'pro', or 'enterprise'")
+    billing_cycle: str = Field(..., description="'monthly', 'annual', or 'pay_as_you_go'")
+    payment_method: str = Field(..., description="'bank_transfer', 'mpesa_manual', 'cash', 'cheque'")
+    reference_code: str = Field(..., description="External transaction or receipt reference code")
+    amount_paid: Optional[float] = 0.0
+    notes: Optional[str] = None
+    custom_expiry_days: Optional[int] = None
+
+
+# ---------------------------------------------------------------------------
+# Routes - Tenant Facing
+# ---------------------------------------------------------------------------
+
+@router.get("/my", response_model=list[SubscriptionOut])
+def get_my_subscriptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Get current user's tenant subscriptions."""
+    if current_user.tenant_id is None:
+        return []
+    return db.query(Subscription).filter(
+        Subscription.tenant_id == current_user.tenant_id,
+    ).order_by(Subscription.created_at.desc()).all()
+
+
+@router.get("/", response_model=list[SubscriptionOut])
+def list_subscriptions(
+    tenant_id: int | None = None,
+    status: SubscriptionStatus | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    """List all subscriptions (Super Admin only)."""
+    query = db.query(Subscription)
+    if tenant_id is not None:
+        query = query.filter(Subscription.tenant_id == tenant_id)
+    if status is not None:
+        query = query.filter(Subscription.status == status)
+    return query.order_by(Subscription.created_at.desc()).all()
+
 
 @router.post("/", response_model=SubscriptionOut, status_code=status.HTTP_201_CREATED)
 def create_subscription(
@@ -75,6 +120,7 @@ def create_subscription(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
+    """Create a new subscription (Super Admin only)."""
     tenant = db.query(Tenant).filter(Tenant.id == payload.tenant_id).first()
     if not tenant:
         raise HTTPException(
@@ -115,39 +161,13 @@ def create_subscription(
     return db_sub
 
 
-@router.get("/", response_model=list[SubscriptionOut])
-def list_subscriptions(
-    tenant_id: int | None = None,
-    status: SubscriptionStatus | None = None,
-    db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
-):
-    query = db.query(Subscription)
-    if tenant_id is not None:
-        query = query.filter(Subscription.tenant_id == tenant_id)
-    if status is not None:
-        query = query.filter(Subscription.status == status)
-    return query.order_by(Subscription.created_at.desc()).all()
-
-
-@router.get("/my", response_model=list[SubscriptionOut])
-def get_my_subscriptions(
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    if current_user.tenant_id is None:
-        return []
-    return db.query(Subscription).filter(
-        Subscription.tenant_id == current_user.tenant_id,
-    ).order_by(Subscription.created_at.desc()).all()
-
-
 @router.get("/{subscription_id}", response_model=SubscriptionOut)
 def get_subscription(
     subscription_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Get a specific subscription by ID."""
     return _get_authorized_subscription(subscription_id, current_user, db)
 
 
@@ -156,9 +176,11 @@ def update_subscription(
     subscription_id: int,
     payload: SubscriptionUpdate,
     db: Session = Depends(get_db),
-    current_user: User = super_admin_only,
+    current_user: User = Depends(get_current_user), 
 ):
+    """Update subscription (e.g., toggle auto_renew)."""
     sub = _get_authorized_subscription(subscription_id, current_user, db)
+    
     for field, value in payload.model_dump(exclude_unset=True).items():
         setattr(sub, field, value)
     db.commit()
@@ -172,6 +194,7 @@ def suspend_subscription(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
+    """Suspend a subscription (Super Admin only)."""
     sub = _get_authorized_subscription(subscription_id, current_user, db)
     if sub.status == SubscriptionStatus.suspended:
         raise HTTPException(
@@ -193,6 +216,7 @@ def reactivate_subscription(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
+    """Reactivate a suspended subscription (Super Admin only)."""
     sub = _get_authorized_subscription(subscription_id, current_user, db)
     if sub.status == SubscriptionStatus.active:
         raise HTTPException(
@@ -231,6 +255,7 @@ def cancel_subscription(
     db: Session = Depends(get_db),
     current_user: User = super_admin_only,
 ):
+    """Cancel a subscription (Super Admin only)."""
     sub = _get_authorized_subscription(subscription_id, current_user, db)
     if sub.status == SubscriptionStatus.cancelled:
         raise HTTPException(
@@ -241,6 +266,87 @@ def cancel_subscription(
     tenant = db.query(Tenant).filter(Tenant.id == sub.tenant_id).first()
     if tenant:
         tenant.subscription_status = SubscriptionStatus.cancelled
+    db.commit()
+    db.refresh(sub)
+    return sub
+
+
+# ---------------------------------------------------------------------------
+# Routes - Super Admin Manual Provisioning
+# ---------------------------------------------------------------------------
+
+@router.post("/admin/manual-activate", response_model=SubscriptionOut)
+async def superadmin_manual_provision(
+    payload: ManualProvisionRequest,
+    db: Session = Depends(get_db),
+    current_user: User = super_admin_only,
+):
+    """
+    Super Admin Endpoint: Manually provisions or upgrades a tenant's subscription tier
+    after verifying offline/bank payments.
+    """
+    clean_plan = payload.plan.lower().strip()
+    if clean_plan == "professional":
+        clean_plan = "pro"
+
+    if clean_plan not in ["starter", "pro", "enterprise", "pay_as_you_go"]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid plan. Must be 'starter', 'pro', 'enterprise', or 'pay_as_you_go'."
+        )
+
+    clean_cycle = payload.billing_cycle.lower().strip()
+    if clean_cycle not in ["monthly", "annual", "pay_as_you_go"]:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Invalid billing cycle. Must be 'monthly', 'annual', or 'pay_as_you_go'."
+        )
+
+    now = datetime.now(timezone.utc)
+    if payload.custom_expiry_days and payload.custom_expiry_days > 0:
+        duration_days = payload.custom_expiry_days
+    else:
+        duration_days = 365 if clean_cycle == "annual" else 30
+
+    ends_at = now + timedelta(days=duration_days)
+
+    sub = (
+        db.query(Subscription)
+        .filter(Subscription.tenant_id == payload.tenant_id)
+        .order_by(Subscription.created_at.desc())
+        .first()
+    )
+
+    if sub:
+        sub.plan = clean_plan
+        sub.billing_cycle = clean_cycle
+        sub.status = SubscriptionStatus.active
+        sub.starts_at = now
+        sub.ends_at = ends_at
+        sub.auto_renew = True
+        sub.updated_at = now
+    else:
+        sub = Subscription(
+            tenant_id=payload.tenant_id,
+            plan=clean_plan,
+            billing_cycle=clean_cycle,
+            status=SubscriptionStatus.active,
+            starts_at=now,
+            ends_at=ends_at,
+            auto_renew=True,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(sub)
+
+    # Sync tenant-level settings
+    tenant = db.query(Tenant).filter(Tenant.id == payload.tenant_id).first()
+    if tenant:
+        if hasattr(tenant, "plan"):
+            tenant.plan = clean_plan
+        if hasattr(tenant, "billing_cycle"):
+            tenant.billing_cycle = clean_cycle
+
     db.commit()
     db.refresh(sub)
     return sub

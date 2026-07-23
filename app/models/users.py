@@ -1,4 +1,4 @@
-# app/models/users.py
+# backend/app/models/users.py
 import enum
 from sqlalchemy import Boolean, Column, Date, DateTime, Enum, ForeignKey, Integer, String, text
 from sqlalchemy.dialects.postgresql import JSONB
@@ -21,6 +21,7 @@ class User(Base):
     full_name = Column(String, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     password_hash = Column(String, nullable=True) # Made nullable to support invite-only creation
+    avatar_url = Column(String, nullable=True)
     
     # UI Preferences
     theme_preference = Column(String(20), nullable=True, default="system", server_default="system")
@@ -34,11 +35,15 @@ class User(Base):
     # Security & Access
     permissions = Column(JSONB, nullable=False, server_default=text("'[]'::jsonb"), default=list)
     two_factor_enabled = Column(Boolean, nullable=False, default=False, server_default="false")
+    failed_login_attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    account_locked_until = Column(DateTime(timezone=True), nullable=True)
     last_login_at = Column(DateTime(timezone=True), nullable=True)
     
     # Compliance (Required for Drivers/Staff)
     id_number = Column(String, nullable=True)
+    id_image_url = Column(String, nullable=True)
     dl_number = Column(String, nullable=True)
+    dl_image_url = Column(String, nullable=True)
     dl_expiry = Column(Date, nullable=True)
     
     # Account Status
@@ -46,10 +51,19 @@ class User(Base):
     is_suspended = Column(Boolean, nullable=False, default=False, server_default="false")
     suspension_reason = Column(String, nullable=True)
     
-    # ✅ NEW: Invite & Onboarding Lifecycle
+    # Verification & Onboarding Lifecycle
+    email_verified = Column(Boolean, nullable=False, default=False, server_default="false")
+    phone_verified = Column(Boolean, nullable=False, default=False, server_default="false")
+    is_onboarded = Column(Boolean, nullable=False, default=False, server_default="false")
+    
+    # ✅ NEW: Agency Owner Flag
+    # When True, this user is the primary owner of the tenant, auto-verified, 
+    # and protected from modification by other tenant admins.
+    is_super_tenant_admin = Column(Boolean, nullable=False, default=False, server_default="false")
+    
+    # Invite System
     invite_token = Column(String, unique=True, index=True, nullable=True)
     invite_expires_at = Column(DateTime(timezone=True), nullable=True)
-    is_onboarded = Column(Boolean, nullable=False, default=False, server_default="false")
     
     role = Column(
         Enum(UserRole),

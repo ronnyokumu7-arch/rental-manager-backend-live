@@ -1,4 +1,4 @@
-# app/routers/user/recovery.py
+# app/routers/users/recovery.py
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
@@ -21,7 +21,7 @@ def _mask_email(email: str) -> str:
     if not email or "@" not in email:
         return "***"
     local, domain = email.split("@", 1)
-    return f"{local[0]}***@{domain}" if len(local) > 1 else "***@{domain}"
+    return f"{local[0]}***@{domain}" if len(local) > 1 else f"***@{domain}"
 
 
 def _mask_phone(phone: str | None) -> str | None:
@@ -46,9 +46,10 @@ def get_user_recovery_options(
     return {
         "email_masked": _mask_email(user.email),
         "phone_masked": _mask_phone(user.phone_number),
-        "phone_verified": getattr(user, "phone_verified", False),
+        "phone_verified": user.phone_verified, # ✅ Direct access now that it's in the model
         "two_factor_enabled": user.two_factor_enabled,
-        "account_locked_until": user.account_locked_until.isoformat() if getattr(user, "account_locked_until", None) else None,
+        # ✅ Safe fallback for account_locked_until (add to model later if implementing auto-lockout)
+        "account_locked_until": getattr(user, "account_locked_until", None).isoformat() if getattr(user, "account_locked_until", None) else None,
     }
 
 

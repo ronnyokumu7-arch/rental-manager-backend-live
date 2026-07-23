@@ -46,5 +46,5 @@ class Booking(Base):
     tenant = relationship("Tenant", back_populates="bookings")
     client = relationship("Client", back_populates="bookings")
     vehicle = relationship("Vehicle", back_populates="bookings")
-    contract = relationship("Contract", back_populates="booking", uselist=False)
     invoices = relationship("Invoice", back_populates="booking", cascade="all, delete-orphan")
+    contract = relationship("Contract", back_populates="booking", uselist=False, cascade="all, delete-orphan")

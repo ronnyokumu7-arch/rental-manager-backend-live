@@ -1,9 +1,10 @@
+# backend/app/routers/contracts/management.py (or your actual contracts router file)
 import base64
 import os
 from datetime import datetime, timedelta, timezone
 import uuid
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
@@ -14,11 +15,10 @@ from app.models.contracts import Contract, ContractStatus
 from app.models.tenants import Tenant
 from app.models.users import User
 from app.models.vehicles import Vehicle
-from app.schemas.contract import ContractOut, PublicContractView
+from app.schemas.contract import ContractOut, PublicContractView, ContractSignPayload
 from app.services.contracts import create_contract_for_booking
 from app.services.contract_pdf import generate_contract_pdf
 from app.services.email import send_contract_to_client
-from app.schemas.contract import ContractSignPayload
 
 router = APIRouter(prefix="/contracts", tags=["contracts"])
 
@@ -49,11 +49,16 @@ def list_contracts(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(Contract).filter(Contract.tenant_id == current_user.tenant_id)
+    # ✅ UPDATED: Eagerly load 'booking' AND 'client' so computed fields can access them
+    query = db.query(Contract).options(
+        joinedload(Contract.booking).joinedload(Booking.client)
+    ).filter(Contract.tenant_id == current_user.tenant_id)
+    
     if booking_id is not None:
         query = query.filter(Contract.booking_id == booking_id)
     if contract_status is not None:
         query = query.filter(Contract.status == contract_status)
+        
     return query.order_by(Contract.created_at.desc()).all()
 
 @router.get("/{contract_id}", response_model=ContractOut)
@@ -62,7 +67,20 @@ def get_contract(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    return _get_contract_or_404(contract_id, current_user.tenant_id, db)
+    # ✅ Also eager load here for consistency
+    contract = db.query(Contract).options(
+        joinedload(Contract.booking).joinedload(Booking.client)
+    ).filter(
+        Contract.id == contract_id,
+        Contract.tenant_id == current_user.tenant_id,
+    ).first()
+    
+    if not contract:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Contract not found"
+        )
+    return contract
 
 @router.get("/{contract_id}/pdf")
 def download_contract_pdf(
@@ -132,12 +150,15 @@ def generate_share_link(
 
     contract.share_token = share_token
     contract.share_token_expires_at = expires_at
-    contract.status = ContractStatus.sent
+    
+    # ✅ FIX: Only change status to "sent" if it is currently a "draft"
+    if contract.status == ContractStatus.draft:
+        contract.status = ContractStatus.sent
 
     db.commit()
     db.refresh(contract)
 
-    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000") # Update to your frontend URL
+    base_url = os.getenv("FRONTEND_URL", "http://localhost:3000")
     share_url = f"{base_url}/contracts/view/{share_token}"
 
     return {

@@ -6,17 +6,18 @@ from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, Str
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from app.db.database import Base
-from app.models.payment.airtel import AirtelMoneyConfig
-from app.models.payment.stripe import StripeConfig
-from app.models.payment.paypal import PaypalConfig
-from app.models.payment.mpesa import MpesaConfig
-from app.models.payment.bank import BankAccountConfig
+from app.models.payment_gateways.airtel import AirtelMoneyConfig
+from app.models.payment_gateways.stripe import StripeConfig
+from app.models.payment_gateways.paypal import PaypalConfig
+from app.models.payment_gateways.mpesa import MpesaConfig
+from app.models.payment_gateways.bank import BankAccountConfig
 
 
 class SubscriptionStatus(str, enum.Enum):
     trial = "trial"
     starter_trial = "starter_trial"
     active = "active"
+    pending_verification = "pending_verification"  # ✅ NEW: Flagged when payment reference is awaiting Super Admin review
     past_due = "past_due"
     suspended = "suspended"
     cancelled = "cancelled"
@@ -39,6 +40,9 @@ class Tenant(Base):
     email = Column(String(255), unique=True, nullable=False, index=True)
     phone_number = Column(String(30), nullable=True)  # Primary contact / M-Pesa number
 
+    # Agency Owner
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+
     # Denormalized Admin Snapshot (for zero-join Super Admin lookups)
     admin_name = Column(String(150), nullable=True)
     admin_email = Column(String(255), nullable=True)
@@ -50,7 +54,7 @@ class Tenant(Base):
     suspended_at = Column(DateTime(timezone=True), nullable=True)
     suspension_reason = Column(Text, nullable=True)
 
-    # ✅ NEW: Recovery & Audit Trail (for secure admin email changes)
+    # Recovery & Audit Trail
     last_reset_request_at = Column(DateTime(timezone=True), nullable=True)
     email_change_cooldown_until = Column(DateTime(timezone=True), nullable=True)
     admin_email_changed_at = Column(DateTime(timezone=True), nullable=True)
@@ -64,6 +68,11 @@ class Tenant(Base):
         default=SubscriptionStatus.trial,
         server_default=SubscriptionStatus.trial.value,
     )
+
+    # ✅ NEW: Subscription Preferences & Overrides
+    billing_cycle = Column(String(20), nullable=False, default="monthly", server_default="monthly") # monthly | annual
+    auto_renew = Column(Boolean, nullable=False, default=True, server_default="true")
+    custom_vehicle_limit = Column(Integer, nullable=True)  # Optional Super Admin override for custom fleet sizes
 
     trial_ends_at = Column(DateTime(timezone=True), nullable=True)
     subscription_ends_at = Column(DateTime(timezone=True), nullable=True)
@@ -81,10 +90,16 @@ class Tenant(Base):
 
     # Relationships
     users = relationship("User", back_populates="tenant", cascade="all, delete-orphan", foreign_keys="[User.tenant_id]")
+    owner = relationship("User", foreign_keys="[Tenant.owner_id]", uselist=False)
+    
     clients = relationship("Client", back_populates="tenant", cascade="all, delete-orphan")
     vehicles = relationship("Vehicle", back_populates="tenant", cascade="all, delete-orphan")
     bookings = relationship("Booking", back_populates="tenant", cascade="all, delete-orphan")
     subscriptions = relationship("Subscription", back_populates="tenant", cascade="all, delete-orphan")
+    
+    # ✅ NEW: Payment verification reference tracking link
+    payment_verifications = relationship("PaymentVerification", back_populates="tenant", cascade="all, delete-orphan")
+
     invoices = relationship("Invoice", back_populates="tenant", cascade="all, delete-orphan")
     payments = relationship("Payment", back_populates="tenant", cascade="all, delete-orphan")
     profile = relationship("TenantProfile", back_populates="tenant", uselist=False, cascade="all, delete-orphan")

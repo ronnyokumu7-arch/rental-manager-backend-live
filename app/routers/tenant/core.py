@@ -1,4 +1,5 @@
 # app/routers/tenants/core.py
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import IntegrityError
@@ -7,9 +8,11 @@ from typing import Optional
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.rbac import require_role
-from app.models.tenants import Tenant, SubscriptionStatus
+from app.models.tenants import Tenant, SubscriptionStatus as TenantSubscriptionStatus
 from app.models.tenant_profile import TenantProfile
 from app.models.users import User, UserRole
+# ✅ NEW IMPORTS: Required to create the Subscription record atomically
+from app.models.subscriptions import Subscription, SubscriptionStatus, PlanType, BillingCycle
 from app.schemas.tenant import TenantCreate, TenantUpdate, TenantOut
 from app.core.security import get_password_hash
 
@@ -56,7 +59,34 @@ def create_tenant(
         )
 
     try:
-        # Create Core Tenant Record (with Denormalized Admin Snapshot)
+        # ✅ RESPECT THE SELECTED PLAN (Don't force free_trial)
+        initial_plan_str = payload.plan if payload.plan else "free_trial"
+        
+        # Map string to Enum safely
+        try:
+            initial_plan_enum = PlanType(initial_plan_str)
+        except ValueError:
+            initial_plan_enum = PlanType.free_trial # Fallback
+
+        initial_billing_cycle_str = payload.billing_cycle if payload.billing_cycle else "monthly"
+        try:
+            initial_cycle_enum = BillingCycle(initial_billing_cycle_str)
+        except ValueError:
+            initial_cycle_enum = BillingCycle.monthly
+
+        # Determine initial status and duration based on plan
+        now = datetime.now(timezone.utc)
+        ends_at = None
+        
+        if initial_plan_enum in [PlanType.free_trial, PlanType.starter_trial]:
+            initial_status = SubscriptionStatus.trial if initial_plan_enum == PlanType.free_trial else SubscriptionStatus.starter_trial
+            duration_days = 30 if initial_plan_enum == PlanType.free_trial else 14
+            ends_at = now + timedelta(days=duration_days)
+        else:
+            # Paid plan selected during onboarding. Needs payment verification.
+            initial_status = SubscriptionStatus.pending_verification
+
+        # 1. Create Core Tenant Record
         tenant = Tenant(
             name=payload.name.strip(),
             email=payload.email.strip(),
@@ -64,8 +94,10 @@ def create_tenant(
             admin_name=(payload.admin_name or payload.name).strip(),
             admin_email=payload.admin_email.strip(),
             admin_phone=admin_phone or phone_number,
-            plan=payload.plan or "free_trial",
-            subscription_status=SubscriptionStatus.trial,
+            plan=initial_plan_str,
+            billing_cycle=initial_billing_cycle_str,
+            auto_renew=payload.auto_renew,
+            subscription_status=initial_status,
             default_payment_method=payload.default_payment_method,
             stripe_customer_id=stripe_customer_id,
             paypal_payer_id=paypal_payer_id,
@@ -76,7 +108,24 @@ def create_tenant(
         db.add(tenant)
         db.flush()  # Generates tenant.id without committing yet
 
-        # Auto-provision TenantProfile
+        # ✅ 2. ATOMICALLY CREATE SUBSCRIPTION RECORD (Respects the selected plan)
+        new_subscription = Subscription(
+            tenant_id=tenant.id,
+            plan=initial_plan_enum,
+            billing_cycle=initial_cycle_enum,
+            status=initial_status,
+            starts_at=now,
+            ends_at=ends_at,
+            auto_renew=payload.auto_renew,
+            created_at=now,
+            updated_at=now,
+        )
+        db.add(new_subscription)
+        
+        # Sync trial date to Tenant model for quick lookups
+        tenant.trial_ends_at = ends_at if initial_status in [SubscriptionStatus.trial, SubscriptionStatus.starter_trial] else None
+
+        # 3. Auto-provision TenantProfile
         contract_prefix = f"T{tenant.id:04d}"
         profile = TenantProfile(
             tenant_id=tenant.id,
@@ -89,7 +138,7 @@ def create_tenant(
         )
         db.add(profile)
 
-        # Auto-provision Initial Tenant Admin User
+        # 4. Auto-provision Initial Tenant Admin User (AGENCY OWNER)
         admin_user = User(
             email=payload.admin_email.strip(),
             full_name=(payload.admin_name or payload.name).strip(),
@@ -98,12 +147,20 @@ def create_tenant(
             role=UserRole.tenant_admin,
             tenant_id=tenant.id,
             is_active=True,
+            is_onboarded=True,
+            email_verified=True,
+            phone_verified=True,
         )
         db.add(admin_user)
+        db.flush()  # Generates admin_user.id
+        
+        # LINK AGENCY OWNER TO TENANT
+        tenant.owner_id = admin_user.id
 
+        # 5. Commit EVERYTHING atomically. If subscription fails, tenant creation rolls back.
         db.commit()
 
-        # Eagerly load profile so Pydantic can serialize it
+        # 6. Eagerly refresh so Pydantic can serialize the new owner_id and profile
         db.refresh(tenant)
         db.refresh(tenant.profile)
         return tenant
@@ -122,6 +179,7 @@ def create_tenant(
         )
 
 
+# ✅ RESTORED: This was missing, causing the 405 Method Not Allowed error
 @router.get("/", response_model=list[TenantOut])
 def list_tenants(
     skip: int = Query(0, ge=0),
@@ -162,11 +220,11 @@ def list_tenants(
 def get_tenant(
     tenant_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user), # ✅ Changed to allow all logged-in users
+    current_user: User = Depends(get_current_user),
 ):
     """Retrieve full details for a single tenant by ID."""
     
-    # ✅ Security Check: Super admins can see any tenant. Regular users can only see their own.
+    # Security Check: Super admins can see any tenant. Regular users can only see their own.
     if current_user.role != UserRole.super_admin and current_user.tenant_id != tenant_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 

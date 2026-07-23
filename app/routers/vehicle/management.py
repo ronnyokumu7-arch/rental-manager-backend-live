@@ -127,6 +127,7 @@ def restore_vehicle(
         
     vehicle.is_archived = False
     vehicle.archived_at = None
+    vehicle.status = VehicleStatus.available
     db.commit()
     db.refresh(vehicle)
     return vehicle

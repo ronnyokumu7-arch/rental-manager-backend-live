@@ -32,6 +32,16 @@ def _validate_job_title_and_department(role: UserRole, department: str | None, j
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid job title for department '{department}'.")
 
 # ---------------------------------------------------------------------------
+# Agency Owner Helper
+# ---------------------------------------------------------------------------
+def _is_agency_owner(user: User, db: Session) -> bool:
+    """Checks if the user is the primary owner of their tenant."""
+    if not user.tenant_id:
+        return False
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    return tenant is not None and tenant.owner_id == user.id
+
+# ---------------------------------------------------------------------------
 # Business Logic Helpers
 # ---------------------------------------------------------------------------
 def _get_user_or_404(user_id: int, db: Session) -> User:
@@ -57,7 +67,8 @@ def _enforce_create_permission(current_user: User, new_role: UserRole, new_tenan
     if new_tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant admins can only create users within their own tenant")
 
-def _enforce_update_permission(current_user: User, target_user: User, update_data: dict) -> None:
+# ✅ UPDATED: Added db: Session to check Agency Owner status
+def _enforce_update_permission(current_user: User, target_user: User, update_data: dict, db: Session) -> None:
     # Super Admins can update anyone, anything
     if current_user.role == UserRole.super_admin:
         return
@@ -87,10 +98,25 @@ def _enforce_update_permission(current_user: User, target_user: User, update_dat
     if target_user.role == UserRole.super_admin:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Tenant admins cannot update super admin users")
 
-def _enforce_staff_permission(current_user: User, target_user: User, action: str) -> None:
+    # ✅ NEW: AGENCY OWNER PROTECTION
+    # Regular Tenant Admins cannot modify the Agency Owner (unless they are the owner themselves, handled above)
+    if _is_agency_owner(target_user, db):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You cannot modify the Agency Owner's profile.")
+
+# ✅ UPDATED: Added db: Session and removed blanket ban on tenant_admin
+def _enforce_staff_permission(current_user: User, target_user: User, action: str, db: Session) -> None:
     if current_user.role == UserRole.super_admin:
         return
+        
     if target_user.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Tenant admins can only {action} users within their own tenant")
-    if target_user.role in (UserRole.super_admin, UserRole.tenant_admin):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Tenant admins can only {action} tenant staff")
+        
+    # ✅ NEW: AGENCY OWNER PROTECTION
+    # Block regular Tenant Admins from verifying/suspending/deleting the Agency Owner
+    if _is_agency_owner(target_user, db) and current_user.id != target_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Only the Super Admin can {action} the Agency Owner.")
+        
+    # ✅ FIXED: Removed UserRole.tenant_admin from the blocked list.
+    # Tenant Admins can now manage other Tenant Admins, provided they aren't the Agency Owner.
+    if target_user.role == UserRole.super_admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=f"Tenant admins cannot {action} super admin users")

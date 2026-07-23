@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session, joinedload
 
 from app.db.database import get_db
-from app.dependencies.auth import get_current_user
-from app.dependencies.subscription import require_active_subscription
+from app.dependencies.auth import get_current_user  # ✅ Use this instead
 from app.models.bookings import Booking, BookingStatus
 from app.models.clients import Client, ClientStatus
 from app.models.users import User
@@ -29,9 +28,12 @@ def list_bookings(
     vehicle_id: int = Query(None),
     client_id: int = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
-    query = db.query(Booking).filter(
+    query = db.query(Booking).options(
+        joinedload(Booking.client),
+        joinedload(Booking.vehicle)
+    ).filter(
         Booking.tenant_id == current_user.tenant_id,
         Booking.is_archived == False,
     )
@@ -44,9 +46,12 @@ def list_bookings(
 @router.get("/archived", response_model=list[BookingOut])
 def list_archived_bookings(
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
-    return db.query(Booking).filter(
+    return db.query(Booking).options(
+        joinedload(Booking.client),
+        joinedload(Booking.vehicle)
+    ).filter(
         Booking.tenant_id == current_user.tenant_id,
         Booking.is_archived == True,
     ).order_by(Booking.archived_at.desc()).all()
@@ -55,13 +60,12 @@ def list_archived_bookings(
 def get_booking(
     booking_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
-    # ✅ Eagerly load client, vehicle, and invoices for the Profile Page
     booking = db.query(Booking).options(
         joinedload(Booking.client),
         joinedload(Booking.vehicle),
-        joinedload(Booking.invoices) # Assumes you have an 'invoices' relationship on the Booking model
+        joinedload(Booking.invoices) 
     ).filter(
         Booking.id == booking_id,
         Booking.tenant_id == current_user.tenant_id,
@@ -75,7 +79,7 @@ def get_booking(
 def create_booking(
     booking: BookingCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
     client = db.query(Client).filter(
         Client.id == booking.client_id,
@@ -134,7 +138,7 @@ def update_booking(
     booking_id: int,
     booking_update: BookingUpdate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     update_data = booking_update.model_dump(exclude_unset=True)
@@ -148,7 +152,7 @@ def update_booking(
 def archive_booking(
     booking_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status == BookingStatus.active:
@@ -165,7 +169,7 @@ def archive_booking(
 def restore_booking(
     booking_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if not booking.is_archived:
@@ -180,7 +184,7 @@ def restore_booking(
 def delete_booking(
     booking_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_active_subscription),
+    current_user: User = Depends(get_current_user), # ✅ FIXED
 ):
     booking = _get_booking_or_404(booking_id, current_user.tenant_id, db)
     if booking.status == BookingStatus.active:

@@ -1,13 +1,15 @@
+# backend/app/routers/payments/management.py (or your actual payments router file)
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
 from app.dependencies.subscription import require_active_subscription
+from app.models.bookings import Booking
 from app.models.invoices import Invoice, InvoiceStatus
 from app.models.payments import Payment, PaymentMethod, PaymentStatus
 from app.models.users import User
@@ -24,8 +26,11 @@ def list_payments(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    query = db.query(Payment, Invoice.invoice_number).join(
-        Invoice, Payment.invoice_id == Invoice.id
+    # ✅ Eagerly load the relationship chain so Pydantic computed fields can access client/invoice data
+    query = db.query(Payment).options(
+        joinedload(Payment.invoice)
+        .joinedload(Invoice.booking)
+        .joinedload(Booking.client)
     ).filter(Payment.tenant_id == current_user.tenant_id)
 
     if invoice_id is not None:
@@ -35,26 +40,31 @@ def list_payments(
     if method_filter is not None:
         query = query.filter(Payment.method == method_filter)
 
-    results = query.order_by(Payment.created_at.desc()).all()
+    # ✅ Return SQLAlchemy objects directly. Pydantic will automatically map them 
+    # and evaluate the @computed_field properties (invoice_number, client_id, client_name).
+    return query.order_by(Payment.created_at.desc()).all()
 
-    return [
-        PaymentOut(
-            id=p.id,
-            invoice_id=p.invoice_id,
-            tenant_id=p.tenant_id,
-            amount=p.amount,
-            currency_code=p.currency_code,
-            method=p.method,
-            reference=p.reference,
-            status=p.status,
-            paid_at=p.paid_at,
-            recorded_by=p.recorded_by,
-            notes=p.notes,
-            created_at=p.created_at,
-            invoice_number=inv_num,
-        )
-        for p, inv_num in results
-    ]
+
+@router.get("/{payment_id}", response_model=PaymentOut)
+def get_payment(
+    payment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_active_subscription),
+):
+    # ✅ Eager load for the dedicated ops page / single payment view
+    payment = db.query(Payment).options(
+        joinedload(Payment.invoice)
+        .joinedload(Invoice.booking)
+        .joinedload(Booking.client)
+    ).filter(
+        Payment.id == payment_id,
+        Payment.tenant_id == current_user.tenant_id
+    ).first()
+
+    if not payment:
+        raise HTTPException(status_code=404, detail="Payment not found")
+    
+    return payment
 
 
 @router.post("/{payment_id}/void", response_model=PaymentOut)
@@ -105,6 +115,8 @@ def export_payments_csv(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
+    # For CSV export, the manual join is actually more efficient than joinedload 
+    # since we are building a flat list of strings anyway.
     query = db.query(Payment, Invoice.invoice_number).join(
         Invoice, Payment.invoice_id == Invoice.id
     ).filter(Payment.tenant_id == current_user.tenant_id)

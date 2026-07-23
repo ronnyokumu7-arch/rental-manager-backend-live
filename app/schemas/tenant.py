@@ -1,7 +1,7 @@
 # app/schemas/tenant.py
 import enum
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, List
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -29,7 +29,7 @@ class TenantBase(BaseModel):
 class TenantCreate(TenantBase):
     """Maps directly to the 4-step Onboarding Wizard payload."""
     
-    # ✅ NEW: Denormalized Admin Snapshot (for zero-join Super Admin lookups)
+    # Denormalized Admin Snapshot
     admin_name: str = Field(..., min_length=2, max_length=150, description="Initial Tenant Admin full name")
     admin_email: EmailStr = Field(..., description="Initial Tenant Admin email (used for auth & display)")
     admin_phone: Optional[str] = Field(None, max_length=30, description="Initial Tenant Admin direct phone")
@@ -46,7 +46,8 @@ class TenantCreate(TenantBase):
     
     # Subscription & Billing (Step 3)
     plan: str = Field(default="free_trial", description="Initial plan tier")
-    billing_cycle: Optional[str] = Field(default="monthly", description="Monthly or annual billing preference")
+    billing_cycle: str = Field(default="monthly", description="Monthly or annual billing preference")
+    auto_renew: bool = Field(default=True, description="Enable automated plan renewal preference")
 
     # Optional payment gateway setup
     default_payment_method: Optional[PaymentMethodType] = None
@@ -69,7 +70,7 @@ class TenantUpdate(BaseModel):
     email: Optional[EmailStr] = None
     phone_number: Optional[str] = Field(None, max_length=30)
     
-    # ✅ NEW: Allow updating the denormalized admin snapshot
+    # Allow updating the denormalized admin snapshot
     admin_name: Optional[str] = Field(None, min_length=2, max_length=150)
     admin_email: Optional[EmailStr] = None
     admin_phone: Optional[str] = Field(None, max_length=30)
@@ -81,6 +82,9 @@ class TenantUpdate(BaseModel):
     # Subscription Management
     plan: Optional[str] = None
     subscription_status: Optional[SubscriptionStatus] = None
+    billing_cycle: Optional[str] = Field(None, description="monthly | annual")
+    auto_renew: Optional[bool] = None
+    custom_vehicle_limit: Optional[int] = Field(None, description="Super Admin manual capacity override")
     
     # Payment Gateway Updates
     default_payment_method: Optional[PaymentMethodType] = None
@@ -98,6 +102,36 @@ class TenantUpdate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Specialized Subscription & Verification Schemas
+# ---------------------------------------------------------------------------
+
+class AutoRenewToggle(BaseModel):
+    """Simple payload for instant toggle switch in settings."""
+    auto_renew: bool
+
+
+class PaymentVerificationCreate(BaseModel):
+    """Tenant payment reference submission payload."""
+    plan: str = Field(..., description="Target plan ID: starter, pro, enterprise")
+    billing_cycle: str = Field(..., description="monthly or annual")
+    payment_method: PaymentMethodType = Field(..., description="mpesa or bank")
+    reference_code: str = Field(..., min_length=3, max_length=60, description="M-Pesa or Bank transaction code")
+    notes: Optional[str] = Field(None, max_length=500, description="Optional notes for Super Admin")
+
+    @field_validator("reference_code", mode="before")
+    @classmethod
+    def uppercase_reference(cls, v):
+        if isinstance(v, str):
+            return v.strip().upper()
+        return v
+
+
+class PaymentVerificationReview(BaseModel):
+    """Super Admin decision payload when approving or rejecting manual payment code."""
+    rejection_reason: Optional[str] = Field(None, description="Required if rejecting request")
+
+
+# ---------------------------------------------------------------------------
 # Output Schemas
 # ---------------------------------------------------------------------------
 
@@ -110,7 +144,7 @@ class TenantProfileOut(BaseModel):
     phone: Optional[str] = None
     email: Optional[str] = None
     website: Optional[str] = None
-    tax_number: Optional[str] = None  # KRA PIN
+    tax_number: Optional[str] = None
     logo_url: Optional[str] = None
     contract_prefix: str
     contract_footer: Optional[str] = None
@@ -122,7 +156,10 @@ class TenantOut(TenantBase):
     """Unified output for Super Admin table AND tenant self-service views."""
     id: int
     
-    # ✅ NEW: Denormalized Admin Snapshot (instant access, no user join needed)
+    # Agency Owner Relational Link
+    owner_id: Optional[int] = Field(None, description="ID of the primary Agency Owner user")
+    
+    # Denormalized Admin Snapshot
     admin_name: Optional[str] = None
     admin_email: Optional[str] = None
     admin_phone: Optional[str] = None
@@ -136,6 +173,10 @@ class TenantOut(TenantBase):
     # Subscription & Billing
     plan: str
     subscription_status: SubscriptionStatus
+    billing_cycle: str
+    auto_renew: bool
+    custom_vehicle_limit: Optional[int] = None
+    
     trial_ends_at: Optional[datetime] = None
     subscription_ends_at: Optional[datetime] = None
     grace_period_ends_at: Optional[datetime] = None
@@ -146,7 +187,7 @@ class TenantOut(TenantBase):
     paypal_payer_id: Optional[str] = None
     payment_metadata: Optional[Dict[str, Any]] = None
     
-    # Nested Profile Data (Joined from TenantProfile table)
+    # Nested Profile Data
     profile: Optional[TenantProfileOut] = None
     
     # Timestamps

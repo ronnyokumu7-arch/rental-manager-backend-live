@@ -12,11 +12,10 @@ from app.schemas.task import TaskCreate, TaskOut, TaskUpdate
 
 router = APIRouter(prefix="/tasks", tags=["tasks"])
 
-# The Bouncers: Only admins can manage the unassigned pool
 admin_or_above = Depends(require_role([UserRole.super_admin, UserRole.tenant_admin]))
 
 # ---------------------------------------------------------------------------
-# 1. PERSONAL TASKS
+# 1. TASKS FEED
 # ---------------------------------------------------------------------------
 @router.get("/my-tasks", response_model=List[TaskOut])
 def get_my_tasks(
@@ -26,17 +25,22 @@ def get_my_tasks(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    query = db.query(Task).filter(
-        Task.tenant_id == current_user.tenant_id,
-        Task.user_id == current_user.id,
-        Task.is_archived == False
-    )
-    if status: 
-        query = query.filter(Task.status == status)
-    if category: 
-        query = query.filter(Task.category == category)
+    query = db.query(Task).filter(Task.is_archived == False)
+    
+    if current_user.role == UserRole.super_admin:
+        pass # Super admins see all tasks across all tenants
+    elif current_user.role == UserRole.tenant_admin:
+        query = query.filter(Task.tenant_id == current_user.tenant_id)
+    else:
+        # Staff only see tasks assigned to them
+        query = query.filter(
+            Task.tenant_id == current_user.tenant_id,
+            Task.user_id == current_user.id
+        )
         
-    # ✅ FIX: Removed the loop that tried to promote 'upcoming' to 'pending'
+    if status: query = query.filter(Task.status == status)
+    if category: query = query.filter(Task.category == category)
+        
     return query.order_by(Task.due_date.asc(), Task.priority.desc()).limit(limit).all()
 
 # ---------------------------------------------------------------------------
@@ -48,7 +52,6 @@ def get_user_tasks(
     db: Session = Depends(get_db),
     current_user: User = admin_or_above
 ):
-    """Allows an admin to fetch tasks for a specific staff member."""
     return db.query(Task).filter(
         Task.tenant_id == current_user.tenant_id,
         Task.user_id == user_id,
@@ -90,7 +93,7 @@ def claim_task(
         raise HTTPException(status_code=404, detail="Task not found or already claimed")
     
     task.user_id = current_user.id
-    task.status = TaskStatus.pending # ✅ Already correct
+    task.status = TaskStatus.pending
     db.commit()
     db.refresh(task)
     return task
@@ -107,8 +110,7 @@ def assign_task(
     
     task = db.query(Task).filter(
         Task.id == task_id,
-        Task.tenant_id == current_user.tenant_id,
-        Task.user_id == None
+        Task.tenant_id == current_user.tenant_id
     ).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
@@ -121,12 +123,13 @@ def assign_task(
         raise HTTPException(status_code=404, detail="Target user not found in your agency")
         
     task.user_id = target_user.id
-    task.status = TaskStatus.pending # ✅ FIX: Changed from 'upcoming' to 'pending'
+    task.status = TaskStatus.pending
     task.requires_role = None
     db.commit()
     db.refresh(task)
     return task
 
+# ✅ FIXED: Handles Super Admins (who might have tenant_id = None)
 @router.patch("/{task_id}", response_model=TaskOut)
 def update_task(
     task_id: int,
@@ -134,13 +137,22 @@ def update_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    task = db.query(Task).filter(
-        Task.id == task_id,
-        Task.tenant_id == current_user.tenant_id,
-        Task.user_id == current_user.id
-    ).first()
+    query = db.query(Task).filter(Task.id == task_id)
+    
+    if current_user.role == UserRole.super_admin:
+        pass # Super admins can update any task
+    elif current_user.role == UserRole.tenant_admin:
+        query = query.filter(Task.tenant_id == current_user.tenant_id)
+    else:
+        # Staff can only update tasks assigned to them
+        query = query.filter(
+            Task.tenant_id == current_user.tenant_id,
+            Task.user_id == current_user.id
+        )
+        
+    task = query.first()
     if not task:
-        raise HTTPException(status_code=404, detail="Task not found")
+        raise HTTPException(status_code=404, detail="Task not found or you do not have permission to update it")
         
     update_data = task_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
@@ -162,14 +174,11 @@ def create_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    # Only admins can create tasks for other users
-    if task.user_id and task.user_id != current_user.id and current_user.role not in ["tenant_admin", "super_admin"]:
+    if task.user_id and task.user_id != current_user.id and current_user.role not in [UserRole.tenant_admin, UserRole.super_admin]:
         raise HTTPException(status_code=403, detail="Only admins can assign tasks to others")
         
-    # Exclude fields that we are going to override manually
     task_data = task.model_dump(exclude={"is_system_generated", "created_by"})
     
-    # SECURITY: Auto-assign tenant_id from the current user's token
     db_task = Task(
         **task_data,
         tenant_id=current_user.tenant_id,
@@ -190,15 +199,13 @@ def delete_task(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    task = db.query(Task).filter(
-        Task.id == task_id,
-        Task.tenant_id == current_user.tenant_id
-    ).first()
+    task = db.query(Task).filter(Task.id == task_id).first()
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
         
-    if task.user_id != current_user.id and current_user.role not in [UserRole.tenant_admin, UserRole.super_admin]:
-        raise HTTPException(status_code=403, detail="Not authorized to delete this task")
-        
+    if current_user.role not in [UserRole.tenant_admin, UserRole.super_admin]:
+        if task.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this task")
+            
     db.delete(task)
     db.commit()

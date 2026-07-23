@@ -7,11 +7,11 @@ from app.dependencies.auth import get_current_user
 from app.dependencies.rbac import require_role
 from app.models.tenants import Tenant, PaymentMethodType
 from app.models.users import User, UserRole
-from app.models.payment.mpesa import MpesaConfig
-from app.models.payment.airtel import AirtelMoneyConfig
-from app.models.payment.bank import BankAccountConfig
-from app.models.payment.stripe import StripeConfig
-from app.models.payment.paypal import PaypalConfig
+from app.models.payment_gateways.mpesa import MpesaConfig
+from app.models.payment_gateways.airtel import AirtelMoneyConfig
+from app.models.payment_gateways.bank import BankAccountConfig
+from app.models.payment_gateways.stripe import StripeConfig
+from app.models.payment_gateways.paypal import PaypalConfig
 
 router = APIRouter()
 

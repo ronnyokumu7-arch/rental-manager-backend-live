@@ -1,8 +1,9 @@
+# backend/app/schemas/invoice.py
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Any
 
-from pydantic import BaseModel, computed_field
+from pydantic import BaseModel, computed_field, Field
 
 from app.models.invoices import InvoiceStatus
 
@@ -47,9 +48,34 @@ class InvoiceOut(BaseModel):
     discount_amount: Decimal
     discount_reason: Optional[str] = None
 
+    # ✅ CRITICAL FIX: Explicitly declare 'booking' so Pydantic populates it from SQLAlchemy,
+    # but exclude=True ensures it doesn't bloat the final JSON response.
+    booking: Optional[Any] = Field(default=None, exclude=True)
+
     @computed_field
     @property
     def remaining_balance(self) -> Decimal:
         return max(Decimal("0"), self.amount_due - (self.amount_paid or Decimal("0")))
+
+    @computed_field
+    @property
+    def booking_number(self) -> Optional[str]:
+        if self.booking:
+            return self.booking.booking_number
+        return None
+
+    @computed_field
+    @property
+    def client_id(self) -> Optional[int]:
+        if self.booking and getattr(self.booking, 'client', None):
+            return self.booking.client.id
+        return None
+
+    @computed_field
+    @property
+    def client_name(self) -> Optional[str]:
+        if self.booking and getattr(self.booking, 'client', None):
+            return self.booking.client.full_name
+        return None
 
     model_config = {"from_attributes": True}

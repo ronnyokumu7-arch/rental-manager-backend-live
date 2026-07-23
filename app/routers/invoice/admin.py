@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload # ✅ Added joinedload
 
 from app.db.database import get_db
 from app.dependencies.auth import get_current_user
@@ -26,11 +26,16 @@ def list_invoices(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    query = db.query(Invoice).filter(Invoice.tenant_id == current_user.tenant_id)
+    # ✅ Eagerly load booking AND client to prevent N+1 queries and populate computed fields
+    query = db.query(Invoice).options(
+        joinedload(Invoice.booking).joinedload(Booking.client)
+    ).filter(Invoice.tenant_id == current_user.tenant_id)
+    
     if status_filter:
         query = query.filter(Invoice.status == status_filter)
     if booking_id is not None:
         query = query.filter(Invoice.booking_id == booking_id)
+        
     return query.order_by(Invoice.created_at.desc()).all()
 
 
@@ -40,10 +45,14 @@ def get_invoice(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_active_subscription),
 ):
-    invoice = db.query(Invoice).filter(
+    # ✅ Also eager load here for consistency if the profile page needs it
+    invoice = db.query(Invoice).options(
+        joinedload(Invoice.booking).joinedload(Booking.client)
+    ).filter(
         Invoice.id == invoice_id,
         Invoice.tenant_id == current_user.tenant_id
     ).first()
+    
     if not invoice:
         raise HTTPException(status_code=404, detail="Invoice not found")
     return invoice
